@@ -19,18 +19,23 @@ import {
   DualTaskQuestion,
   RapidLogicQuestion,
 } from '@/lib/questions';
-import { getTimerForModule } from '@/lib/adaptive';
+import {
+  calculateSessionDifficulty,
+  getTimerForModule,
+  getModuleDuration,
+  SessionDifficultyConfig,
+} from '@/lib/adaptive';
 
 const { width } = Dimensions.get('window');
 
 type ModuleType = 'pattern' | 'memory' | 'ruleMutation' | 'dualTask' | 'rapidLogic';
 
-const MODULE_CONFIG: { type: ModuleType; name: string; duration: number; icon: string; color: string }[] = [
-  { type: 'pattern', name: 'Pattern Density', duration: 300, icon: 'grid', color: '#00D4FF' },
-  { type: 'memory', name: 'Memory Stretch', duration: 240, icon: 'layers', color: '#7B61FF' },
-  { type: 'ruleMutation', name: 'Rule Mutation', duration: 240, icon: 'shuffle', color: '#00E676' },
-  { type: 'dualTask', name: 'Dual-Task', duration: 240, icon: 'git-merge', color: '#FFB74D' },
-  { type: 'rapidLogic', name: 'Rapid Logic', duration: 180, icon: 'flash', color: '#FF6EC7' },
+const MODULE_META: { type: ModuleType; name: string; icon: string; color: string }[] = [
+  { type: 'pattern', name: 'Pattern Density', icon: 'grid', color: '#00D4FF' },
+  { type: 'memory', name: 'Memory Stretch', icon: 'layers', color: '#7B61FF' },
+  { type: 'ruleMutation', name: 'Rule Mutation', icon: 'shuffle', color: '#00E676' },
+  { type: 'dualTask', name: 'Dual-Task', icon: 'git-merge', color: '#FFB74D' },
+  { type: 'rapidLogic', name: 'Rapid Logic', icon: 'flash', color: '#FF6EC7' },
 ];
 
 const SHAPE_ICONS: Record<string, string> = {
@@ -44,12 +49,11 @@ const SHAPE_ICONS: Record<string, string> = {
 
 export default function SessionScreen() {
   const insets = useSafeAreaInsets();
-  const { profile } = useUser();
+  const { profile, sessionLogs } = useUser();
   const [phase, setPhase] = useState<'intro' | 'moduleIntro' | 'playing' | 'done'>('intro');
   const [currentModuleIndex, setCurrentModuleIndex] = useState(0);
   const [questionIndex, setQuestionIndex] = useState(0);
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
-  const [moduleStartTime, setModuleStartTime] = useState(Date.now());
   const [questionStartTime, setQuestionStartTime] = useState(Date.now());
   const [currentQuestion, setCurrentQuestion] = useState<any>(null);
   const [previousRuleIdx, setPreviousRuleIdx] = useState<number | undefined>();
@@ -59,6 +63,8 @@ export default function SessionScreen() {
   const [confidenceLevel, setConfidenceLevel] = useState<string | null>(null);
   const [moduleTimeLeft, setModuleTimeLeft] = useState(0);
   const [questionTimerLeft, setQuestionTimerLeft] = useState(0);
+  const [diffConfig, setDiffConfig] = useState<SessionDifficultyConfig | null>(null);
+  const [moduleDurations, setModuleDurations] = useState<Record<string, number>>({});
 
   const [moduleResults, setModuleResults] = useState<Record<ModuleType, { correct: number; total: number; totalReactionTime: number }>>({
     pattern: { correct: 0, total: 0, totalReactionTime: 0 },
@@ -71,10 +77,22 @@ export default function SessionScreen() {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const timerInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const questionTimerInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const memoryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const topPadding = Platform.OS === 'web' ? 67 : insets.top;
 
   useEffect(() => {
+    if (!profile) return;
+
+    const config = calculateSessionDifficulty(profile, sessionLogs);
+    setDiffConfig(config);
+
+    const durations: Record<string, number> = {};
+    for (const mod of MODULE_META) {
+      durations[mod.type] = getModuleDuration(mod.type, config.questionCountBias);
+    }
+    setModuleDurations(durations);
+
     Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }).start();
 
     const introTimer = setTimeout(() => {
@@ -85,18 +103,36 @@ export default function SessionScreen() {
       clearTimeout(introTimer);
       if (timerInterval.current) clearInterval(timerInterval.current);
       if (questionTimerInterval.current) clearInterval(questionTimerInterval.current);
+      if (memoryTimerRef.current) clearTimeout(memoryTimerRef.current);
     };
   }, []);
 
+  const getTierForModule = useCallback((moduleType: ModuleType): number => {
+    if (!diffConfig) return 1;
+    switch (moduleType) {
+      case 'pattern': return diffConfig.patternTier;
+      case 'memory': return diffConfig.memoryTier;
+      case 'ruleMutation': return diffConfig.speedTier;
+      case 'dualTask': return diffConfig.flexTier;
+      case 'rapidLogic': return diffConfig.dualTier;
+      default: return 1;
+    }
+  }, [diffConfig]);
+
+  const getStagnationMode = useCallback((moduleType: ModuleType): string | null => {
+    if (!diffConfig) return null;
+    return diffConfig.stagnationAdjustments[moduleType] || null;
+  }, [diffConfig]);
+
   const startModule = useCallback(() => {
-    const config = MODULE_CONFIG[currentModuleIndex];
+    const moduleType = MODULE_META[currentModuleIndex].type;
+    const duration = moduleDurations[moduleType] || 240;
     setPhase('playing');
     setQuestionIndex(0);
     setSelectedOption(null);
-    setModuleStartTime(Date.now());
-    setModuleTimeLeft(config.duration);
+    setModuleTimeLeft(duration);
     setPreviousRuleIdx(undefined);
-    generateNextQuestion(config.type, 0);
+    generateNextQuestion(moduleType, 0);
 
     if (timerInterval.current) clearInterval(timerInterval.current);
     timerInterval.current = setInterval(() => {
@@ -109,33 +145,35 @@ export default function SessionScreen() {
         return prev - 1;
       });
     }, 1000);
-  }, [currentModuleIndex, profile]);
+  }, [currentModuleIndex, profile, diffConfig, moduleDurations]);
 
   const generateNextQuestion = useCallback((moduleType: ModuleType, qIndex: number) => {
-    if (!profile) return;
-    const tier = Math.max(1, profile.level);
+    if (!profile || !diffConfig) return;
+    const tier = getTierForModule(moduleType);
+    const stagnation = getStagnationMode(moduleType);
 
     let question: any;
     switch (moduleType) {
       case 'pattern':
-        question = generatePatternQuestion(tier);
+        question = generatePatternQuestion(tier, stagnation);
         break;
       case 'memory':
-        question = generateMemoryQuestion(profile.memorySpan, tier);
+        question = generateMemoryQuestion(profile.memorySpan, tier, stagnation);
         setMemoryPhase('show');
-        setTimeout(() => setMemoryPhase('answer'), question.displayTimeMs);
+        if (memoryTimerRef.current) clearTimeout(memoryTimerRef.current);
+        memoryTimerRef.current = setTimeout(() => setMemoryPhase('answer'), question.displayTimeMs);
         break;
       case 'ruleMutation':
-        question = generateRuleMutationQuestion(tier, qIndex, previousRuleIdx);
-        setPreviousRuleIdx(parseInt(question.currentRule));
+        question = generateRuleMutationQuestion(tier, qIndex, previousRuleIdx, stagnation);
+        setPreviousRuleIdx(question.ruleIndex);
         break;
       case 'dualTask':
-        question = generateDualTaskQuestion(tier);
+        question = generateDualTaskQuestion(tier, stagnation);
         setDualTaskPhase('visual');
         setDualVisualAnswer(null);
         break;
       case 'rapidLogic':
-        question = generateRapidLogicQuestion(tier);
+        question = generateRapidLogicQuestion(tier, diffConfig.timerMultiplier, stagnation);
         setConfidenceLevel(null);
         const timerSec = question.timerSeconds;
         setQuestionTimerLeft(timerSec);
@@ -155,24 +193,25 @@ export default function SessionScreen() {
     setCurrentQuestion(question);
     setQuestionStartTime(Date.now());
     setSelectedOption(null);
-  }, [profile, previousRuleIdx]);
+  }, [profile, diffConfig, previousRuleIdx, getTierForModule, getStagnationMode]);
 
   const advanceModule = useCallback(() => {
     if (timerInterval.current) clearInterval(timerInterval.current);
     if (questionTimerInterval.current) clearInterval(questionTimerInterval.current);
+    if (memoryTimerRef.current) clearTimeout(memoryTimerRef.current);
 
-    if (currentModuleIndex < MODULE_CONFIG.length - 1) {
+    if (currentModuleIndex < MODULE_META.length - 1) {
       setCurrentModuleIndex(prev => prev + 1);
       setPhase('moduleIntro');
     } else {
       setPhase('done');
       const scores: Record<string, ModuleScore> = {};
-      for (const mod of MODULE_CONFIG) {
+      for (const mod of MODULE_META) {
         const r = moduleResults[mod.type];
         scores[mod.type] = {
           accuracy: r.total > 0 ? (r.correct / r.total) * 100 : 0,
           reactionTime: r.total > 0 ? r.totalReactionTime / r.total : 0,
-          difficultyTier: profile?.level || 1,
+          difficultyTier: getTierForModule(mod.type),
           questionsAnswered: r.total,
           correctAnswers: r.correct,
         };
@@ -182,14 +221,14 @@ export default function SessionScreen() {
         params: { scores: JSON.stringify(scores) },
       });
     }
-  }, [currentModuleIndex, moduleResults, profile]);
+  }, [currentModuleIndex, moduleResults, profile, getTierForModule]);
 
   const handleAnswer = useCallback((optionIndex: number) => {
     if (selectedOption !== null) return;
     setSelectedOption(optionIndex);
 
     const reactionTime = Date.now() - questionStartTime;
-    const moduleType = MODULE_CONFIG[currentModuleIndex].type;
+    const moduleType = MODULE_META[currentModuleIndex].type;
     const isCorrect = optionIndex === currentQuestion?.correctIndex;
 
     if (Platform.OS !== 'web') {
@@ -264,33 +303,57 @@ export default function SessionScreen() {
   };
 
   if (phase === 'intro') {
-    const traitNames = ['Pattern Density', 'Working Memory', 'Cognitive Flexibility', 'Dual Processing', 'Rapid Logic'];
-    const focusTrait = traitNames[Math.floor(Math.random() * traitNames.length)];
-
+    const focusName = diffConfig?.focusTraitName || 'Cognitive Training';
     return (
       <View style={[styles.container, { paddingTop: topPadding }]}>
         <Animated.View style={[styles.introContent, { opacity: fadeAnim }]}>
           <Text style={styles.introLabel}>SESSION FOCUS</Text>
-          <Text style={styles.introTitle}>{focusTrait}</Text>
-          <Text style={styles.introSub}>Preparing your adaptive training...</Text>
+          <Text style={styles.introTitle}>{focusName}</Text>
+          <Text style={styles.introSub}>Calibrating your adaptive difficulty...</Text>
+          {diffConfig && (
+            <View style={styles.introTierPreview}>
+              {[
+                { label: 'PTN', val: diffConfig.patternTier },
+                { label: 'MEM', val: diffConfig.memoryTier },
+                { label: 'SPD', val: diffConfig.speedTier },
+                { label: 'FLX', val: diffConfig.flexTier },
+                { label: 'DUL', val: diffConfig.dualTier },
+              ].map((t, i) => (
+                <View key={i} style={styles.introTierItem}>
+                  <Text style={styles.introTierValue}>{t.val}</Text>
+                  <Text style={styles.introTierLabel}>{t.label}</Text>
+                </View>
+              ))}
+            </View>
+          )}
         </Animated.View>
       </View>
     );
   }
 
   if (phase === 'moduleIntro') {
-    const config = MODULE_CONFIG[currentModuleIndex];
+    const meta = MODULE_META[currentModuleIndex];
+    const duration = moduleDurations[meta.type] || 240;
+    const tier = getTierForModule(meta.type);
+    const stagnation = getStagnationMode(meta.type);
+
     return (
       <View style={[styles.container, { paddingTop: topPadding }]}>
         <View style={styles.moduleIntroContent}>
           <View style={styles.moduleCounter}>
             <Text style={styles.moduleCounterText}>MODULE {currentModuleIndex + 1} / 5</Text>
           </View>
-          <View style={[styles.moduleIconBg, { backgroundColor: config.color + '20' }]}>
-            <Ionicons name={config.icon as any} size={40} color={config.color} />
+          <View style={[styles.moduleIconBg, { backgroundColor: meta.color + '20' }]}>
+            <Ionicons name={meta.icon as any} size={40} color={meta.color} />
           </View>
-          <Text style={styles.moduleIntroTitle}>{config.name}</Text>
-          <Text style={styles.moduleIntroDuration}>{Math.floor(config.duration / 60)} minutes</Text>
+          <Text style={styles.moduleIntroTitle}>{meta.name}</Text>
+          <Text style={styles.moduleIntroDuration}>{Math.ceil(duration / 60)} min  |  Tier {tier}</Text>
+          {stagnation && (
+            <View style={styles.stagnationBadge}>
+              <Ionicons name="pulse" size={14} color={Colors.dark.warning} />
+              <Text style={styles.stagnationText}>Variant challenge active</Text>
+            </View>
+          )}
           <Pressable
             style={({ pressed }) => [styles.moduleStartBtn, pressed && { opacity: 0.85 }]}
             onPress={startModule}
@@ -303,8 +366,8 @@ export default function SessionScreen() {
     );
   }
 
-  const config = MODULE_CONFIG[currentModuleIndex];
-  const moduleType = config.type;
+  const meta = MODULE_META[currentModuleIndex];
+  const moduleType = meta.type;
 
   const renderQuestion = () => {
     if (!currentQuestion) return null;
@@ -313,6 +376,7 @@ export default function SessionScreen() {
       const q = currentQuestion as PatternQuestion;
       return (
         <View style={styles.questionArea}>
+          <Text style={styles.transformInfo}>{q.transformationCount} transformation{q.transformationCount > 1 ? 's' : ''} active</Text>
           <View style={styles.patternGrid}>
             {q.grid.map((row, ri) => (
               <View key={ri} style={styles.patternRow}>
@@ -356,6 +420,7 @@ export default function SessionScreen() {
         return (
           <View style={styles.questionArea}>
             <Text style={styles.memoryInstruction}>Remember this sequence</Text>
+            <Text style={styles.memoryDisplayTime}>{(q.displayTimeMs / 1000).toFixed(1)}s display</Text>
             <View style={styles.memorySequence}>
               {q.sequence.map((s, i) => (
                 <View key={i} style={[styles.memorySymbol, { borderColor: s.color }]}>
@@ -367,11 +432,9 @@ export default function SessionScreen() {
         );
       }
 
-      const taskLabel = q.task === 'reverse' ? 'Select the REVERSE order' : q.task === 'sort' ? 'Select the SORTED order' : 'Select EVEN-positioned items';
-
       return (
         <View style={styles.questionArea}>
-          <Text style={styles.questionPrompt}>{taskLabel}</Text>
+          <Text style={styles.questionPrompt}>{q.taskDescription}</Text>
           <View style={styles.memoryOptions}>
             {q.options.map((opt, i) => (
               <Pressable
@@ -436,6 +499,12 @@ export default function SessionScreen() {
         return (
           <View style={styles.questionArea}>
             <Text style={styles.questionPrompt}>Complete the sequence</Text>
+            {q.distractorEnabled && (
+              <View style={styles.distractorBadge}>
+                <Ionicons name="eye-off" size={12} color={Colors.dark.error} />
+                <Text style={styles.distractorText}>Distractors active</Text>
+              </View>
+            )}
             <View style={styles.dualSequence}>
               {q.visualTask.sequence.map((s, i) => (
                 <View key={i} style={styles.dualSeqItem}>
@@ -469,10 +538,10 @@ export default function SessionScreen() {
 
       return (
         <View style={styles.questionArea}>
-          <Text style={styles.questionPrompt}>Count the flashes of this color:</Text>
+          <Text style={styles.questionPrompt}>Count flashes of this color:</Text>
           <View style={[styles.colorSwatch, { backgroundColor: q.countingTask.targetColor }]} />
           <View style={styles.countFlashRow}>
-            {q.countingTask.flashes.slice(0, 8).map((color, i) => (
+            {q.countingTask.flashes.map((color, i) => (
               <View key={i} style={[styles.flashDot, { backgroundColor: color }]} />
             ))}
           </View>
@@ -500,12 +569,24 @@ export default function SessionScreen() {
 
     if (moduleType === 'rapidLogic') {
       const q = currentQuestion as RapidLogicQuestion;
+      const timerPercent = q.timerSeconds > 0 ? (questionTimerLeft / q.timerSeconds) * 100 : 0;
       return (
         <View style={styles.questionArea}>
           <View style={styles.rapidTimerContainer}>
-            <View style={[styles.rapidTimerBar, { width: `${(questionTimerLeft / q.timerSeconds) * 100}%` }]} />
+            <View style={[
+              styles.rapidTimerBar,
+              {
+                width: `${timerPercent}%`,
+                backgroundColor: timerPercent > 50 ? Colors.dark.tint : timerPercent > 25 ? Colors.dark.warning : Colors.dark.error,
+              },
+            ]} />
           </View>
-          <Text style={styles.rapidTimerText}>{questionTimerLeft}s</Text>
+          <Text style={[
+            styles.rapidTimerText,
+            { color: timerPercent > 25 ? Colors.dark.text : Colors.dark.error },
+          ]}>
+            {questionTimerLeft}s
+          </Text>
           <Text style={styles.rapidQuestion}>{q.question}</Text>
           <View style={styles.rapidOptions}>
             {q.options.map((opt, i) => (
@@ -518,15 +599,16 @@ export default function SessionScreen() {
                   selectedOption !== null && selectedOption !== i && i === q.correctIndex && styles.optionCorrectBg,
                 ]}
                 onPress={() => handleAnswer(i)}
-                disabled={selectedOption !== null}
+                disabled={selectedOption !== null || questionTimerLeft === 0}
               >
                 <Text style={styles.rapidOptionText}>{opt}</Text>
               </Pressable>
             ))}
           </View>
-          {selectedOption === null && (
+          {selectedOption === null && questionTimerLeft > 0 && (
             <View style={styles.confidenceRow}>
-              {['Low', 'Medium', 'High'].map(c => (
+              <Text style={styles.confidenceLabel}>Confidence:</Text>
+              {['Low', 'Med', 'High'].map(c => (
                 <Pressable
                   key={c}
                   style={[styles.confidenceBtn, confidenceLevel === c && styles.confidenceBtnActive]}
@@ -552,7 +634,7 @@ export default function SessionScreen() {
         </Pressable>
         <View style={styles.moduleInfo}>
           <View style={styles.moduleProgressDots}>
-            {MODULE_CONFIG.map((_, i) => (
+            {MODULE_META.map((_, i) => (
               <View
                 key={i}
                 style={[
@@ -563,13 +645,13 @@ export default function SessionScreen() {
               />
             ))}
           </View>
-          <Text style={styles.moduleNameText}>{config.name}</Text>
+          <Text style={styles.moduleNameText}>{meta.name} | T{getTierForModule(moduleType)}</Text>
         </View>
         <Text style={styles.timerText}>{formatTime(moduleTimeLeft)}</Text>
       </View>
 
       <View style={styles.sessionProgress}>
-        <View style={[styles.sessionProgressFill, { width: `${((currentModuleIndex + 1) / MODULE_CONFIG.length) * 100}%`, backgroundColor: config.color }]} />
+        <View style={[styles.sessionProgressFill, { width: `${((currentModuleIndex + 1) / MODULE_META.length) * 100}%`, backgroundColor: meta.color }]} />
       </View>
 
       <View style={styles.questionContainer}>{renderQuestion()}</View>
@@ -597,7 +679,7 @@ const styles = StyleSheet.create({
   },
   introTitle: {
     fontFamily: 'Inter_700Bold',
-    fontSize: 32,
+    fontSize: 28,
     color: Colors.dark.tint,
     textAlign: 'center',
     marginBottom: 12,
@@ -606,6 +688,31 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular',
     fontSize: 15,
     color: Colors.dark.textTertiary,
+    marginBottom: 28,
+  },
+  introTierPreview: {
+    flexDirection: 'row',
+    gap: 14,
+  },
+  introTierItem: {
+    alignItems: 'center',
+    backgroundColor: Colors.dark.surface,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: Colors.dark.surfaceBorder,
+  },
+  introTierValue: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 18,
+    color: Colors.dark.text,
+  },
+  introTierLabel: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 9,
+    color: Colors.dark.textTertiary,
+    letterSpacing: 1,
   },
   moduleIntroContent: {
     flex: 1,
@@ -641,6 +748,20 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular',
     fontSize: 15,
     color: Colors.dark.textSecondary,
+  },
+  stagnationBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: Colors.dark.warningDim,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  stagnationText: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 12,
+    color: Colors.dark.warning,
   },
   moduleStartBtn: {
     flexDirection: 'row',
@@ -719,6 +840,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 20,
   },
+  transformInfo: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 12,
+    color: Colors.dark.textTertiary,
+    letterSpacing: 1,
+  },
   patternGrid: {
     gap: 8,
   },
@@ -770,6 +897,11 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: Colors.dark.text,
     textAlign: 'center',
+  },
+  memoryDisplayTime: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 12,
+    color: Colors.dark.textTertiary,
   },
   memorySequence: {
     flexDirection: 'row',
@@ -875,6 +1007,20 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.dark.surfaceBorder,
   },
+  distractorBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.dark.errorDim,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  distractorText: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 11,
+    color: Colors.dark.error,
+  },
   colorSwatch: {
     width: 40,
     height: 40,
@@ -920,13 +1066,11 @@ const styles = StyleSheet.create({
   },
   rapidTimerBar: {
     height: '100%',
-    backgroundColor: Colors.dark.error,
     borderRadius: 3,
   },
   rapidTimerText: {
     fontFamily: 'Inter_700Bold',
     fontSize: 24,
-    color: Colors.dark.error,
   },
   rapidQuestion: {
     fontFamily: 'Inter_600SemiBold',
@@ -956,11 +1100,17 @@ const styles = StyleSheet.create({
   },
   confidenceRow: {
     flexDirection: 'row',
-    gap: 10,
+    alignItems: 'center',
+    gap: 8,
+  },
+  confidenceLabel: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 12,
+    color: Colors.dark.textTertiary,
   },
   confidenceBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
     borderRadius: 8,
     backgroundColor: Colors.dark.surface,
     borderWidth: 1,
@@ -972,7 +1122,7 @@ const styles = StyleSheet.create({
   },
   confidenceText: {
     fontFamily: 'Inter_500Medium',
-    fontSize: 13,
+    fontSize: 12,
     color: Colors.dark.textSecondary,
   },
   confidenceTextActive: {

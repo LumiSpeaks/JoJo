@@ -15,6 +15,8 @@ export default function SessionCompleteScreen() {
   const { profile, updateProfile, addSessionLog, sessionLogs } = useUser();
   const processedRef = useRef(false);
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const [adjustments, setAdjustments] = React.useState<{ trait: string; change: number; reason: string }[]>([]);
+  const [leveledUp, setLeveledUp] = React.useState(false);
 
   const topPadding = Platform.OS === 'web' ? 67 : insets.top;
 
@@ -22,12 +24,13 @@ export default function SessionCompleteScreen() {
     ? JSON.parse(scoresParam as string)
     : {};
 
+  const defaultScore: ModuleScore = { accuracy: 0, reactionTime: 0, difficultyTier: 1, questionsAnswered: 0, correctAnswers: 0 };
   const moduleScores = {
-    pattern: scores.pattern || { accuracy: 0, reactionTime: 0, difficultyTier: 1, questionsAnswered: 0, correctAnswers: 0 },
-    memory: scores.memory || { accuracy: 0, reactionTime: 0, difficultyTier: 1, questionsAnswered: 0, correctAnswers: 0 },
-    ruleMutation: scores.ruleMutation || { accuracy: 0, reactionTime: 0, difficultyTier: 1, questionsAnswered: 0, correctAnswers: 0 },
-    dualTask: scores.dualTask || { accuracy: 0, reactionTime: 0, difficultyTier: 1, questionsAnswered: 0, correctAnswers: 0 },
-    rapidLogic: scores.rapidLogic || { accuracy: 0, reactionTime: 0, difficultyTier: 1, questionsAnswered: 0, correctAnswers: 0 },
+    pattern: scores.pattern || defaultScore,
+    memory: scores.memory || defaultScore,
+    ruleMutation: scores.ruleMutation || defaultScore,
+    dualTask: scores.dualTask || defaultScore,
+    rapidLogic: scores.rapidLogic || defaultScore,
   };
 
   const overallAccuracy = calculateOverallAccuracy(moduleScores);
@@ -45,12 +48,17 @@ export default function SessionCompleteScreen() {
     processedRef.current = true;
 
     const processResults = async () => {
-      const recentSessions = sessionLogs.map(s => ({ averageAccuracy: s.averageAccuracy }));
-      const result = processSessionResults(profile, moduleScores, recentSessions);
+      const result = processSessionResults(profile, moduleScores, sessionLogs);
+
+      setAdjustments(result.adjustments);
+      setLeveledUp(result.leveledUp);
 
       await updateProfile(result.updatedProfile);
 
-      const avgReactionTime = Object.values(moduleScores).reduce((s, m) => s + m.reactionTime, 0) / 5;
+      const avgReactionTime = Object.values(moduleScores)
+        .filter(m => m.questionsAnswered > 0)
+        .reduce((s, m) => s + m.reactionTime, 0) /
+        Math.max(1, Object.values(moduleScores).filter(m => m.questionsAnswered > 0).length);
 
       const sessionLog: SessionLog = {
         id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
@@ -87,9 +95,16 @@ export default function SessionCompleteScreen() {
 
           <Text style={styles.title}>Session Complete</Text>
 
+          {leveledUp && (
+            <View style={styles.levelUpBanner}>
+              <Ionicons name="arrow-up-circle" size={20} color={Colors.dark.tint} />
+              <Text style={styles.levelUpText}>Level Up!</Text>
+            </View>
+          )}
+
           <View style={styles.scoreCircle}>
             <Text style={styles.scoreValue}>{Math.round(overallAccuracy)}%</Text>
-            <Text style={styles.scoreLabel}>Overall Accuracy</Text>
+            <Text style={styles.scoreLabel}>Overall</Text>
           </View>
 
           <View style={styles.moduleResults}>
@@ -121,16 +136,38 @@ export default function SessionCompleteScreen() {
             })}
           </View>
 
+          {adjustments.length > 0 && (
+            <>
+              <Text style={styles.adjustTitle}>Adaptive Adjustments</Text>
+              <View style={styles.adjustmentsList}>
+                {adjustments.map((adj, i) => (
+                  <View key={i} style={styles.adjustmentRow}>
+                    <Ionicons
+                      name={adj.change > 0 ? 'arrow-up' : adj.change < 0 ? 'arrow-down' : 'remove'}
+                      size={16}
+                      color={adj.change > 0 ? Colors.dark.success : adj.change < 0 ? Colors.dark.error : Colors.dark.textTertiary}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.adjustTrait}>{adj.trait}</Text>
+                      <Text style={styles.adjustReason}>{adj.reason}</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </>
+          )}
+
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
               <Ionicons name="timer" size={18} color={Colors.dark.tint} />
               <Text style={styles.statItemValue}>
                 {(
-                  Object.values(moduleScores).reduce((s, m) => s + m.reactionTime, 0) /
-                  5 /
+                  Object.values(moduleScores)
+                    .filter(m => m.questionsAnswered > 0)
+                    .reduce((s, m) => s + m.reactionTime, 0) /
+                  Math.max(1, Object.values(moduleScores).filter(m => m.questionsAnswered > 0).length) /
                   1000
-                ).toFixed(1)}
-                s
+                ).toFixed(1)}s
               </Text>
               <Text style={styles.statItemLabel}>Avg Speed</Text>
             </View>
@@ -183,18 +220,35 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
     fontSize: 28,
     color: Colors.dark.text,
-    marginBottom: 24,
+    marginBottom: 16,
+  },
+  levelUpBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: Colors.dark.tintDim,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.dark.tintGlow,
+    marginBottom: 16,
+  },
+  levelUpText: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 18,
+    color: Colors.dark.tint,
   },
   scoreCircle: {
-    width: 140,
-    height: 140,
-    borderRadius: 70,
+    width: 130,
+    height: 130,
+    borderRadius: 65,
     backgroundColor: Colors.dark.surface,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 3,
     borderColor: Colors.dark.tint,
-    marginBottom: 32,
+    marginBottom: 28,
   },
   scoreValue: {
     fontFamily: 'Inter_700Bold',
@@ -210,7 +264,7 @@ const styles = StyleSheet.create({
   },
   moduleResults: {
     width: '100%',
-    gap: 12,
+    gap: 10,
     marginBottom: 24,
   },
   moduleResultRow: {
@@ -256,11 +310,46 @@ const styles = StyleSheet.create({
     width: 48,
     textAlign: 'right',
   },
+  adjustTitle: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 14,
+    color: Colors.dark.textSecondary,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    alignSelf: 'flex-start',
+    marginBottom: 10,
+  },
+  adjustmentsList: {
+    width: '100%',
+    gap: 8,
+    marginBottom: 24,
+    backgroundColor: Colors.dark.surface,
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: Colors.dark.surfaceBorder,
+  },
+  adjustmentRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    paddingVertical: 4,
+  },
+  adjustTrait: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 14,
+    color: Colors.dark.text,
+  },
+  adjustReason: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 12,
+    color: Colors.dark.textSecondary,
+  },
   statsRow: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 10,
     width: '100%',
-    marginBottom: 32,
+    marginBottom: 28,
   },
   statItem: {
     flex: 1,

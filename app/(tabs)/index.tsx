@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView, Platform, Modal, Dimensions } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,23 +7,9 @@ import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import Colors from '@/constants/colors';
 import { useUser } from '@/contexts/UserContext';
+import { analyzeWeaknesses, calculateSessionDifficulty, TRAIT_MAP } from '@/lib/adaptive';
 
 const { width } = Dimensions.get('window');
-
-const LEVEL_LABELS: Record<string, string> = {
-  '1': 'Foundation',
-  '2': 'Foundation',
-  '3': 'Foundation',
-  '10': 'Foundation',
-  '11': 'Expansion',
-  '20': 'Expansion',
-  '21': 'Acceleration',
-  '30': 'Acceleration',
-  '31': 'Integration',
-  '40': 'Integration',
-  '41': 'Elite',
-  '50': 'Elite',
-};
 
 function getLevelLabel(level: number): string {
   if (level <= 10) return 'Foundation';
@@ -35,14 +21,25 @@ function getLevelLabel(level: number): string {
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
-  const { profile, canStartSession } = useUser();
+  const { profile, canStartSession, sessionLogs } = useUser();
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+
+  const analysis = useMemo(() => {
+    if (!profile) return null;
+    return analyzeWeaknesses(profile, sessionLogs);
+  }, [profile, sessionLogs]);
+
+  const diffConfig = useMemo(() => {
+    if (!profile) return null;
+    return calculateSessionDifficulty(profile, sessionLogs);
+  }, [profile, sessionLogs]);
 
   if (!profile) return null;
 
   const topPadding = Platform.OS === 'web' ? 67 : insets.top;
   const today = new Date().toDateString();
   const sessionsToday = profile.lastSessionDate === today ? profile.sessionsToday : 0;
+  const maxDaily = profile.subscriptionType === 'premium' ? 99 : 3;
 
   const handleStartSession = () => {
     if (!canStartSession) {
@@ -56,19 +53,30 @@ export default function HomeScreen() {
   };
 
   const traits = [
-    { label: 'Pattern', value: profile.patternLevel, icon: 'grid' as const, color: '#00D4FF' },
-    { label: 'Memory', value: profile.memorySpan, icon: 'layers' as const, color: '#7B61FF' },
-    { label: 'Speed', value: profile.speedIndex, icon: 'trending-up' as const, color: '#00E676' },
-    { label: 'Flex', value: profile.flexibilityScore, icon: 'shuffle' as const, color: '#FFB74D' },
-    { label: 'Dual', value: profile.dualTaskCapacity, icon: 'git-merge' as const, color: '#FF6EC7' },
+    { label: 'Pattern', value: profile.patternLevel, tier: diffConfig?.patternTier || profile.patternLevel, icon: 'grid' as const, color: '#00D4FF' },
+    { label: 'Memory', value: profile.memorySpan, tier: diffConfig?.memoryTier || profile.memorySpan, icon: 'layers' as const, color: '#7B61FF' },
+    { label: 'Speed', value: profile.speedIndex, tier: diffConfig?.speedTier || profile.speedIndex, icon: 'trending-up' as const, color: '#00E676' },
+    { label: 'Flex', value: profile.flexibilityScore, tier: diffConfig?.flexTier || profile.flexibilityScore, icon: 'shuffle' as const, color: '#FFB74D' },
+    { label: 'Dual', value: profile.dualTaskCapacity, tier: diffConfig?.dualTier || profile.dualTaskCapacity, icon: 'git-merge' as const, color: '#FF6EC7' },
   ];
+
+  const isWeakest = (label: string) => {
+    if (!analysis) return false;
+    const map: Record<string, string> = { Pattern: 'Pattern Recognition', Memory: 'Working Memory', Speed: 'Processing Speed', Flex: 'Cognitive Flexibility', Dual: 'Dual-Task Processing' };
+    return analysis.focusTrait.name === map[label];
+  };
+
+  const isStagnant = (label: string) => {
+    if (!analysis) return false;
+    const map: Record<string, string> = { Pattern: 'patternLevel', Memory: 'memorySpan', Speed: 'speedIndex', Flex: 'flexibilityScore', Dual: 'dualTaskCapacity' };
+    return analysis.stagnantTraits.some(st => st.key === map[label]);
+  };
 
   return (
     <View style={[styles.container, { paddingTop: topPadding }]}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-        contentInsetAdjustmentBehavior="automatic"
       >
         <View style={styles.header}>
           <View>
@@ -81,10 +89,30 @@ export default function HomeScreen() {
             </View>
           </View>
           <View style={styles.sessionCounter}>
-            <Text style={styles.sessionCountText}>{sessionsToday}/3</Text>
+            <Text style={styles.sessionCountText}>{sessionsToday}/{maxDaily}</Text>
             <Text style={styles.sessionCountLabel}>today</Text>
           </View>
         </View>
+
+        {analysis && (
+          <View style={styles.aiInsight}>
+            <View style={styles.aiInsightHeader}>
+              <Ionicons name="pulse" size={16} color={Colors.dark.tint} />
+              <Text style={styles.aiInsightTitle}>Adaptive Focus</Text>
+            </View>
+            <Text style={styles.aiInsightText}>
+              Next session targets <Text style={styles.aiInsightHighlight}>{analysis.focusTrait.name}</Text>
+              {analysis.stagnantTraits.length > 0 && (
+                <Text> with variant challenges for stagnant areas</Text>
+              )}
+            </Text>
+            {diffConfig && (
+              <Text style={styles.aiInsightMeta}>
+                Timer: {Math.round(diffConfig.timerMultiplier * 100)}% | Bias: {Math.round((diffConfig.questionCountBias[analysis.focusTrait.module] || 0.2) * 100)}% focus
+              </Text>
+            )}
+          </View>
+        )}
 
         <Pressable
           style={({ pressed }) => [
@@ -115,7 +143,7 @@ export default function HomeScreen() {
               styles.startSessionSub,
               !canStartSession && styles.startSessionSubDisabled,
             ]}>
-              {canStartSession ? '20 minutes of adaptive training' : 'Upgrade for unlimited sessions'}
+              {canStartSession ? 'Personalized adaptive training' : 'Upgrade for unlimited sessions'}
             </Text>
           </LinearGradient>
         </Pressable>
@@ -124,12 +152,26 @@ export default function HomeScreen() {
 
         <View style={styles.traitsGrid}>
           {traits.map((trait, i) => (
-            <View key={i} style={styles.traitCard}>
+            <View key={i} style={[
+              styles.traitCard,
+              isWeakest(trait.label) && styles.traitCardFocus,
+              isStagnant(trait.label) && styles.traitCardStagnant,
+            ]}>
               <View style={[styles.traitIconContainer, { backgroundColor: trait.color + '18' }]}>
                 <Ionicons name={trait.icon} size={20} color={trait.color} />
               </View>
               <Text style={styles.traitValue}>{trait.value}</Text>
               <Text style={styles.traitLabel}>{trait.label}</Text>
+              {isWeakest(trait.label) && (
+                <View style={styles.focusBadge}>
+                  <Text style={styles.focusBadgeText}>FOCUS</Text>
+                </View>
+              )}
+              {isStagnant(trait.label) && !isWeakest(trait.label) && (
+                <View style={styles.stagnantBadge}>
+                  <Text style={styles.stagnantBadgeText}>STAG</Text>
+                </View>
+              )}
             </View>
           ))}
         </View>
@@ -142,7 +184,7 @@ export default function HomeScreen() {
           </View>
           <View style={styles.statCard}>
             <Ionicons name="trophy" size={18} color={Colors.dark.warning} />
-            <Text style={styles.statValue}>{profile.level}/50</Text>
+            <Text style={styles.statValue}>{profile.level}/{profile.subscriptionType === 'premium' ? 50 : 20}</Text>
             <Text style={styles.statLabel}>Level Progress</Text>
           </View>
         </View>
@@ -228,7 +270,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 24,
+    marginBottom: 16,
   },
   greeting: {
     fontFamily: 'Inter_400Regular',
@@ -281,6 +323,43 @@ const styles = StyleSheet.create({
     color: Colors.dark.textSecondary,
     textTransform: 'uppercase',
     letterSpacing: 1,
+  },
+  aiInsight: {
+    backgroundColor: Colors.dark.surface,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: Colors.dark.tint + '30',
+  },
+  aiInsightHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  aiInsightTitle: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 13,
+    color: Colors.dark.tint,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  aiInsightText: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 14,
+    color: Colors.dark.textSecondary,
+    lineHeight: 22,
+  },
+  aiInsightHighlight: {
+    fontFamily: 'Inter_600SemiBold',
+    color: Colors.dark.tint,
+  },
+  aiInsightMeta: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 12,
+    color: Colors.dark.textTertiary,
+    marginTop: 8,
   },
   startSessionButton: {
     borderRadius: 20,
@@ -339,6 +418,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.dark.surfaceBorder,
   },
+  traitCardFocus: {
+    borderColor: Colors.dark.tint + '60',
+    backgroundColor: Colors.dark.tintDim,
+  },
+  traitCardStagnant: {
+    borderColor: Colors.dark.warning + '40',
+  },
   traitIconContainer: {
     width: 36,
     height: 36,
@@ -358,6 +444,32 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: Colors.dark.textSecondary,
     textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  focusBadge: {
+    backgroundColor: Colors.dark.tint + '30',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginTop: 4,
+  },
+  focusBadgeText: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 8,
+    color: Colors.dark.tint,
+    letterSpacing: 1,
+  },
+  stagnantBadge: {
+    backgroundColor: Colors.dark.warningDim,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginTop: 4,
+  },
+  stagnantBadgeText: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 8,
+    color: Colors.dark.warning,
     letterSpacing: 1,
   },
   statsRow: {
