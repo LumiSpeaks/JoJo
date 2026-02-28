@@ -1,4 +1,5 @@
-import { UserProfile, ModuleScore, TraitAdjustment, SessionLog } from './storage';
+import { UserProfile, ModuleScore, TraitAdjustment, SessionLog, IntelligenceIndices } from './storage';
+import { MAX_LEVEL, FREE_TIER_MAX_LEVEL } from './constants';
 
 export type TraitKey = 'patternLevel' | 'memorySpan' | 'speedIndex' | 'flexibilityScore' | 'dualTaskCapacity';
 
@@ -32,7 +33,7 @@ export function analyzeWeaknesses(profile: UserProfile, recentSessions: SessionL
 
   traitValues.sort((a, b) => a.value - b.value);
 
-  const maxPossible = profile.subscriptionType === 'premium' ? 50 : 20;
+  const maxPossible = MAX_LEVEL;
   const rankings = traitValues.map(tv => ({
     trait: tv.trait,
     value: tv.value,
@@ -65,7 +66,7 @@ export function analyzeWeaknesses(profile: UserProfile, recentSessions: SessionL
 
   const biasWeights: Record<string, number> = {};
   const baseBias = 0.2;
-  const focusBias = 0.15;
+  const focusBias = 0.25;
 
   for (const tm of TRAIT_MAP) {
     biasWeights[tm.module] = baseBias;
@@ -98,25 +99,60 @@ export interface SessionDifficultyConfig {
   stagnationAdjustments: Record<string, 'variant' | 'timerCompress' | 'formatChange' | null>;
 }
 
+export function calculateJojoIQ(level: number): number {
+  // Jojo IQ Protocol:
+  // Level 1 (Baseline) -> ~90 IQ
+  // Level 50 (Target) -> 130 IQ (Gifted)
+  // Level > 50 -> +1 IQ per level (e.g., Lvl 100 = 180 IQ)
+
+  if (level >= 50) {
+    // Linear progression from 130 upwards
+    return 130 + (level - 50);
+  } else {
+    // Linear interpolation from 90 to 130
+    // (130 - 90) / 49 = ~0.816 per level
+    const progress = (level - 1) / 49;
+    return Math.round(90 + (progress * 40));
+  }
+}
+
 export function calculateSessionDifficulty(
   profile: UserProfile,
   recentSessions: SessionLog[],
 ): SessionDifficultyConfig {
   const analysis = analyzeWeaknesses(profile, recentSessions);
+  const currentIQ = calculateJojoIQ(profile.level);
 
-  const levelMultiplier = 1 + (profile.level - 1) * 0.04;
+  // Difficulty scaling factor based on IQ target.
+  // We want the app to push users HARDER as they approach IQ 130.
+  // At Level 1 (IQ 90), difficulty multiplier is 1.0
+  // At Level 50 (IQ 130), multiplier is ~2.5 (High intensity)
+  // At Level 100 (IQ 180), multiplier is 4.0 (Extreme)
+  
+  // Base multiplier curves exponentially slightly to ramp up difficulty
+  const levelMultiplier = 1 + Math.pow((profile.level / 100), 1.2) * 3; 
 
   const computeTier = (traitValue: number): number => {
-    return Math.max(1, Math.round(traitValue * levelMultiplier));
+    // Tier calculation now heavily weighted by the global level multiplier
+    // This ensures even if a specific trait score lags, the overall session pushes them up.
+    // We clamp minimum to 1 and allow it to go very high (e.g. 150+) for Genius level.
+    return Math.max(1, Math.round(traitValue * 0.4 + (profile.level * 0.6 * levelMultiplier)));
   };
 
   const stagnationAdjustments: Record<string, 'variant' | 'timerCompress' | 'formatChange' | null> = {};
+  // Below level 15, timer compression is too punishing for developing users —
+  // only apply variety-based challenges instead.
+  const canCompressTimer = profile.level >= 15;
   for (const tm of TRAIT_MAP) {
     if (analysis.stagnantTraits.find(st => st.key === tm.key)) {
       const rand = Math.random();
-      if (rand < 0.33) stagnationAdjustments[tm.module] = 'variant';
-      else if (rand < 0.66) stagnationAdjustments[tm.module] = 'timerCompress';
-      else stagnationAdjustments[tm.module] = 'formatChange';
+      if (canCompressTimer) {
+        if (rand < 0.33) stagnationAdjustments[tm.module] = 'variant';
+        else if (rand < 0.66) stagnationAdjustments[tm.module] = 'timerCompress';
+        else stagnationAdjustments[tm.module] = 'formatChange';
+      } else {
+        stagnationAdjustments[tm.module] = rand < 0.5 ? 'variant' : 'formatChange';
+      }
     } else {
       stagnationAdjustments[tm.module] = null;
     }
@@ -156,18 +192,18 @@ export function getTimerForModule(module: string, tier: number, timerMultiplier:
 }
 
 export function getModuleDuration(module: string, biasWeights: Record<string, number>): number {
-  const totalSeconds = 1200;
+  const totalSeconds = 840; // ~14 min total
   const baseAlloc: Record<string, number> = {
-    pattern: 300,
-    memory: 240,
-    ruleMutation: 240,
-    dualTask: 240,
-    rapidLogic: 180,
+    pattern: 180,
+    memory: 180,
+    ruleMutation: 180,
+    dualTask: 180,
+    rapidLogic: 120,
   };
 
   const weight = biasWeights[module] || 0.2;
   const normalized = weight / 0.2;
-  const base = baseAlloc[module] || 240;
+  const base = baseAlloc[module] || 180;
   return Math.round(base * Math.min(1.3, Math.max(0.8, normalized)));
 }
 
@@ -211,7 +247,7 @@ export function processSessionResults(
     ? last5ReactionTimes[last5ReactionTimes.length - 1] < last5ReactionTimes[0]
     : true;
 
-  const maxTier = updated.subscriptionType === 'premium' ? 50 : 20;
+  const maxTier = profile.subscriptionType === 'premium' ? MAX_LEVEL : FREE_TIER_MAX_LEVEL;
 
   for (const { trait, score } of traitModuleMap) {
     const accuracy = score.accuracy;
@@ -258,10 +294,12 @@ export function processSessionResults(
     const allModulesAbove70 = Object.values(moduleScores).every(m => m.accuracy >= 70);
 
     if (avgLast3 >= 85 && allModulesAbove70 && reactionTrend && updated.level < maxTier) {
-      updated.level += 1;
+      updated.level = Math.min(updated.level + 1, maxTier);
       leveledUp = true;
     }
   }
+
+  updated.level = Math.min(updated.level, maxTier);
 
   updated.sessionsToday += 1;
   updated.lastSessionDate = new Date().toDateString();
@@ -281,6 +319,86 @@ export function calculateOverallAccuracy(moduleScores: {
   const validScores = scores.filter(s => s.questionsAnswered > 0);
   if (validScores.length === 0) return 0;
   return validScores.reduce((sum, s) => sum + s.accuracy, 0) / validScores.length;
+}
+
+/**
+ * Derive higher-order intelligence indices from per-module scores.
+ *
+ * These indices are PROGRESSIVE: they factor in difficulty tier and user level,
+ * so a Level 50 user scoring 80% on Tier 50 questions gets a HIGHER score than
+ * a Level 1 user scoring 80% on Tier 1 questions.
+ *
+ * The score reflects absolute cognitive ability, not just relative performance.
+ */
+export function calculateIntelligenceIndices(
+  moduleScores: {
+    pattern: ModuleScore;
+    memory: ModuleScore;
+    ruleMutation: ModuleScore;
+    dualTask: ModuleScore;
+    rapidLogic: ModuleScore;
+  },
+  userLevel: number
+): IntelligenceIndices {
+  const clamp = (v: number) => Math.max(0, Math.min(100, v));
+
+  // Level multiplier: users at higher levels get a baseline boost
+  // Level 1: 1.0x, Level 50: 1.25x, Level 100: 1.5x
+  const levelMultiplier = 1 + (userLevel / MAX_LEVEL) * 0.5;
+
+  // Calculate weighted scores: (accuracy/100) × tier × levelMultiplier
+  // This means higher tiers and higher levels yield higher raw scores
+  const patternScore =
+    (moduleScores.pattern.accuracy / 100) *
+    moduleScores.pattern.difficultyTier *
+    levelMultiplier;
+
+  const memoryScore =
+    (moduleScores.memory.accuracy / 100) *
+    moduleScores.memory.difficultyTier *
+    levelMultiplier;
+
+  const speedScore =
+    (moduleScores.ruleMutation.accuracy / 100) *
+    moduleScores.ruleMutation.difficultyTier *
+    levelMultiplier;
+
+  const dualScore =
+    (moduleScores.dualTask.accuracy / 100) *
+    moduleScores.dualTask.difficultyTier *
+    levelMultiplier;
+
+  const rapidScore =
+    (moduleScores.rapidLogic.accuracy / 100) *
+    moduleScores.rapidLogic.difficultyTier *
+    levelMultiplier;
+
+  // Maximum possible score at max level (Tier 100 × 1.5 multiplier = 150)
+  const maxPossibleScore = MAX_LEVEL * 1.5;
+
+  // Combine weighted scores with domain-specific weights, then normalize to 0-100
+  const reasoning = clamp(
+    ((patternScore * 0.3 + speedScore * 0.3 + rapidScore * 0.4) / maxPossibleScore) * 100
+  );
+
+  const spatial = clamp(
+    ((patternScore * 0.55 + dualScore * 0.45) / maxPossibleScore) * 100
+  );
+
+  const fluid = clamp(
+    ((patternScore * 0.25 + memoryScore * 0.25 + speedScore * 0.25 + dualScore * 0.25) / maxPossibleScore) * 100
+  );
+
+  const crystallized = clamp(
+    ((rapidScore * 0.8 + patternScore * 0.2) / maxPossibleScore) * 100
+  );
+
+  return {
+    reasoning,
+    spatial,
+    fluid,
+    crystallized,
+  };
 }
 
 export function calculateBaselineLevel(results: { category: string; correct: boolean; reactionTimeMs: number }[]): {
@@ -334,4 +452,133 @@ export function calculateBaselineLevel(results: { category: string; correct: boo
   else level = 1;
 
   return { level, patternLevel, memorySpan, speedIndex, flexibilityScore, dualTaskCapacity };
+}
+
+/**
+ * Calculate Learning Velocity Index: measures how fast user is improving.
+ * Higher values = faster cognitive growth rate.
+ * 
+ * Formula: (current week avg intelligence - last week avg intelligence) / last week avg * session frequency bonus
+ */
+export function calculateLearningVelocity(
+  profile: UserProfile,
+  recentSessions: SessionLog[]
+): { velocity: number; weekOverWeekChange: number; interpretation: string } {
+  if (recentSessions.length < 2) {
+    return {
+      velocity: 0,
+      weekOverWeekChange: 0,
+      interpretation: 'Complete more sessions to track learning velocity',
+    };
+  }
+
+  // Get sessions from last 7 days and previous 7 days
+  const now = Date.now();
+  const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
+  const fourteenDaysAgo = now - 14 * 24 * 60 * 60 * 1000;
+
+  const lastWeekSessions = recentSessions.filter(s => {
+    const sessionTime = new Date(s.date).getTime();
+    return sessionTime >= sevenDaysAgo && sessionTime <= now;
+  });
+
+  const previousWeekSessions = recentSessions.filter(s => {
+    const sessionTime = new Date(s.date).getTime();
+    return sessionTime >= fourteenDaysAgo && sessionTime < sevenDaysAgo;
+  });
+
+  if (lastWeekSessions.length === 0) {
+    return {
+      velocity: 0,
+      weekOverWeekChange: 0,
+      interpretation: 'Train this week to measure velocity',
+    };
+  }
+
+  // Calculate average intelligence indices for each period
+  const getAvgIntelligence = (sessions: SessionLog[]) => {
+    if (sessions.length === 0) return 0;
+    const sum = sessions.reduce((total, s) => {
+      if (!s.intelligenceIndices) return total;
+      return total + (
+        s.intelligenceIndices.reasoning +
+        s.intelligenceIndices.spatial +
+        s.intelligenceIndices.fluid +
+        s.intelligenceIndices.crystallized
+      ) / 4;
+    }, 0);
+    return sum / sessions.length;
+  };
+
+  const currentWeekAvg = getAvgIntelligence(lastWeekSessions);
+  const previousWeekAvg = previousWeekSessions.length > 0 ? getAvgIntelligence(previousWeekSessions) : currentWeekAvg * 0.9;
+
+  // Calculate percentage change
+  const weekOverWeekChange = previousWeekAvg > 0
+    ? ((currentWeekAvg - previousWeekAvg) / previousWeekAvg) * 100
+    : 0;
+
+  // Session frequency bonus (more sessions = faster improvement is more meaningful)
+  const sessionFrequencyBonus = 1 + (lastWeekSessions.length / 7) * 0.5;
+
+  // Final velocity score
+  const velocity = weekOverWeekChange * sessionFrequencyBonus;
+
+  // Interpretation
+  let interpretation = '';
+  if (velocity > 15) {
+    interpretation = 'Exceptional growth - you\'re learning significantly faster';
+  } else if (velocity > 8) {
+    interpretation = 'Strong improvement - cognitive capacity expanding rapidly';
+  } else if (velocity > 3) {
+    interpretation = 'Steady progress - consistent cognitive enhancement';
+  } else if (velocity > 0) {
+    interpretation = 'Gradual growth - keep training consistently';
+  } else if (velocity > -5) {
+    interpretation = 'Consolidating - maintaining current capacity';
+  } else {
+    interpretation = 'Take a rest day - recovery helps long-term growth';
+  }
+
+  return { velocity, weekOverWeekChange, interpretation };
+}
+
+/**
+ * Update streak tracking when a session completes.
+ * Returns updated streak values.
+ */
+export function updateStreak(profile: UserProfile): {
+  currentStreak: number;
+  longestStreak: number;
+  isNewRecord: boolean;
+} {
+  const today = new Date().toDateString();
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toDateString();
+  
+  const lastStreakDate = profile.lastStreakDate || '';
+  let currentStreak = profile.currentStreak || 0;
+  const longestStreak = profile.longestStreak || 0;
+
+  if (lastStreakDate === today) {
+    // Already counted today
+    return { currentStreak, longestStreak, isNewRecord: false };
+  } else if (lastStreakDate === yesterday) {
+    // Continuing streak
+    currentStreak += 1;
+  } else if (lastStreakDate === '') {
+    // First ever session
+    currentStreak = 1;
+  } else {
+    // Streak broken, start over
+    currentStreak = 1;
+  }
+
+  const isNewRecord = currentStreak > longestStreak;
+  const newLongestStreak = Math.max(currentStreak, longestStreak);
+
+  return {
+    currentStreak,
+    longestStreak: newLongestStreak,
+    isNewRecord,
+  };
 }

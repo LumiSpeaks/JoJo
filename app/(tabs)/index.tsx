@@ -6,108 +6,70 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import Colors from '@/constants/colors';
+import { useThemeColors } from '@/hooks/useThemeColors';
 import { useUser } from '@/contexts/UserContext';
-import { analyzeWeaknesses, calculateSessionDifficulty, TRAIT_MAP } from '@/lib/adaptive';
+import { analyzeWeaknesses, calculateSessionDifficulty, calculateLearningVelocity, calculateJojoIQ } from '@/lib/adaptive';
 
-const { width } = Dimensions.get('window');
-
-function getLevelLabel(level: number): string {
-  if (level <= 10) return 'Foundation';
-  if (level <= 20) return 'Expansion';
-  if (level <= 30) return 'Acceleration';
-  if (level <= 40) return 'Integration';
-  return 'Elite';
-}
+// ... (imports)
 
 export default function HomeScreen() {
-  const insets = useSafeAreaInsets();
-  const { profile, canStartSession, sessionLogs } = useUser();
-  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  // ... (hooks)
 
-  const analysis = useMemo(() => {
-    if (!profile) return null;
-    return analyzeWeaknesses(profile, sessionLogs);
-  }, [profile, sessionLogs]);
-
-  const diffConfig = useMemo(() => {
-    if (!profile) return null;
-    return calculateSessionDifficulty(profile, sessionLogs);
-  }, [profile, sessionLogs]);
-
-  if (!profile) return null;
-
-  const topPadding = Platform.OS === 'web' ? 67 : insets.top;
-  const today = new Date().toDateString();
-  const sessionsToday = profile.lastSessionDate === today ? profile.sessionsToday : 0;
-  const maxDaily = profile.subscriptionType === 'premium' ? 99 : 3;
-
-  const handleStartSession = () => {
-    if (!canStartSession) {
-      setShowUpgradeModal(true);
-      return;
-    }
-    if (Platform.OS !== 'web') {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    }
-    router.push('/session');
-  };
-
-  const traits = [
-    { label: 'Pattern', value: profile.patternLevel, tier: diffConfig?.patternTier || profile.patternLevel, icon: 'grid' as const, color: '#00D4FF' },
-    { label: 'Memory', value: profile.memorySpan, tier: diffConfig?.memoryTier || profile.memorySpan, icon: 'layers' as const, color: '#7B61FF' },
-    { label: 'Speed', value: profile.speedIndex, tier: diffConfig?.speedTier || profile.speedIndex, icon: 'trending-up' as const, color: '#00E676' },
-    { label: 'Flex', value: profile.flexibilityScore, tier: diffConfig?.flexTier || profile.flexibilityScore, icon: 'shuffle' as const, color: '#FFB74D' },
-    { label: 'Dual', value: profile.dualTaskCapacity, tier: diffConfig?.dualTier || profile.dualTaskCapacity, icon: 'git-merge' as const, color: '#FF6EC7' },
-  ];
-
-  const isWeakest = (label: string) => {
-    if (!analysis) return false;
-    const map: Record<string, string> = { Pattern: 'Pattern Recognition', Memory: 'Working Memory', Speed: 'Processing Speed', Flex: 'Cognitive Flexibility', Dual: 'Dual-Task Processing' };
-    return analysis.focusTrait.name === map[label];
-  };
-
-  const isStagnant = (label: string) => {
-    if (!analysis) return false;
-    const map: Record<string, string> = { Pattern: 'patternLevel', Memory: 'memorySpan', Speed: 'speedIndex', Flex: 'flexibilityScore', Dual: 'dualTaskCapacity' };
-    return analysis.stagnantTraits.some(st => st.key === map[label]);
-  };
+  // Calculate Jojo IQ
+  const currentIQ = useMemo(() => {
+    if (!profile) return 90;
+    return calculateJojoIQ(profile.level);
+  }, [profile]);
 
   return (
-    <View style={[styles.container, { paddingTop: topPadding }]}>
+    <View style={[styles.container, { paddingTop: topPadding, backgroundColor: theme.background }]}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.header}>
           <View>
-            <Text style={styles.greeting}>Cognitive Training</Text>
-            <View style={styles.levelRow}>
-              <Text style={styles.levelText}>Level {profile.level}</Text>
-              <View style={styles.levelBadge}>
-                <Text style={styles.levelBadgeText}>{getLevelLabel(profile.level)}</Text>
+            <Text style={[styles.greeting, { color: theme.textSecondary }]}>J.A.R.V.I.S. PROTOCOL</Text>
+            {personalizedMessage ? (
+              <Text style={[styles.personalizedSub, { color: theme.textSecondary }]} numberOfLines={2}>{personalizedMessage}</Text>
+            ) : null}
+            
+            {/* JOJO IQ DISPLAY */}
+            <View style={[styles.iqBadge, { backgroundColor: theme.brandDim, borderColor: theme.brandGlow }]}>
+              <View style={styles.iqRow}>
+                <Ionicons name="hardware-chip-outline" size={24} color={theme.brand} />
+                <Text style={[styles.iqValue, { color: theme.brand }]}>{currentIQ}</Text>
+              </View>
+              <Text style={[styles.iqLabel, { color: theme.brand }]}>CURRENT IQ</Text>
+            </View>
+
+            <View style={[styles.levelRow, { marginTop: 8 }]}>
+              <Text style={[styles.levelText, { color: theme.text, fontSize: 16 }]}>Level {profile.level}</Text>
+              <View style={[styles.levelProgressBar, { backgroundColor: theme.surfaceBorder }]}>
+                <View style={[styles.levelProgressFill, { width: `${(profile.level / 100) * 100}%`, backgroundColor: theme.accent }]} />
               </View>
             </View>
           </View>
-          <View style={styles.sessionCounter}>
-            <Text style={styles.sessionCountText}>{sessionsToday}/{maxDaily}</Text>
-            <Text style={styles.sessionCountLabel}>today</Text>
+          <View style={[styles.sessionCounter, { backgroundColor: theme.surface, borderColor: theme.surfaceBorder }]}>
+            <Text style={[styles.sessionCountText, { color: theme.text }]}>{sessionsToday}/{maxDaily}</Text>
+            <Text style={[styles.sessionCountLabel, { color: theme.textSecondary }]}>today</Text>
           </View>
         </View>
 
         {analysis && (
-          <View style={styles.aiInsight}>
+          <View style={[styles.aiInsight, { backgroundColor: theme.surface, borderColor: theme.surfaceBorder }]}>
             <View style={styles.aiInsightHeader}>
-              <Ionicons name="pulse" size={16} color={Colors.dark.tint} />
-              <Text style={styles.aiInsightTitle}>Adaptive Focus</Text>
+              <Ionicons name="pulse" size={16} color={theme.brand} />
+              <Text style={[styles.aiInsightTitle, { color: theme.brand }]}>Adaptive Focus</Text>
             </View>
-            <Text style={styles.aiInsightText}>
-              Next session targets <Text style={styles.aiInsightHighlight}>{analysis.focusTrait.name}</Text>
+            <Text style={[styles.aiInsightText, { color: theme.textSecondary }]}>
+              Next session targets <Text style={[styles.aiInsightHighlight, { color: theme.brand }]}>{analysis.focusTrait.name}</Text>
               {analysis.stagnantTraits.length > 0 && (
                 <Text> with variant challenges for stagnant areas</Text>
               )}
             </Text>
-            {diffConfig && (
-              <Text style={styles.aiInsightMeta}>
+            {diffConfig && profile?.subscriptionType === 'premium' && (
+              <Text style={[styles.aiInsightMeta, { color: theme.textTertiary }]}>
                 Timer: {Math.round(diffConfig.timerMultiplier * 100)}% | Bias: {Math.round((diffConfig.questionCountBias[analysis.focusTrait.module] || 0.2) * 100)}% focus
               </Text>
             )}
@@ -123,53 +85,98 @@ export default function HomeScreen() {
           onPress={handleStartSession}
         >
           <LinearGradient
-            colors={canStartSession ? ['#00D4FF', '#0099CC'] : ['#2A2A35', '#1A1A25']}
+            colors={canStartSession ? [theme.brand, '#D4B02E'] : [theme.surfaceLight, theme.surface]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.startSessionGradient}
           >
             <Ionicons
               name="flash"
-              size={28}
-              color={canStartSession ? '#0A0A0F' : Colors.dark.textTertiary}
+              size={22}
+              color={canStartSession ? '#0A0A0F' : theme.textTertiary}
             />
             <Text style={[
               styles.startSessionText,
-              !canStartSession && styles.startSessionTextDisabled,
+              !canStartSession && { color: theme.textSecondary },
             ]}>
               {canStartSession ? 'Start Session' : 'Daily Limit Reached'}
             </Text>
             <Text style={[
               styles.startSessionSub,
-              !canStartSession && styles.startSessionSubDisabled,
+              !canStartSession && { color: theme.textTertiary },
             ]}>
               {canStartSession ? 'Personalized adaptive training' : 'Upgrade for unlimited sessions'}
             </Text>
           </LinearGradient>
         </Pressable>
 
-        <Text style={styles.sectionTitle}>Cognitive Profile</Text>
+        {learningVelocity && learningVelocity.velocity !== 0 && (
+          <View style={[styles.velocityCard, { backgroundColor: theme.surface, borderColor: theme.surfaceBorder }]}>
+            <View style={styles.velocityHeader}>
+              <Ionicons name="trending-up" size={20} color={learningVelocity.velocity > 0 ? theme.success : theme.warning} />
+              <Text style={[styles.velocityTitle, { color: theme.text }]}>Learning Velocity</Text>
+              <Text style={[
+                styles.velocityValue,
+                { color: learningVelocity.velocity > 0 ? theme.success : theme.warning }
+              ]}>
+                {learningVelocity.velocity > 0 ? '+' : ''}{learningVelocity.velocity.toFixed(1)}%
+              </Text>
+            </View>
+            <Text style={[styles.velocityText, { color: theme.text }]}>{learningVelocity.interpretation}</Text>
+            {learningVelocity.velocity > 0 && (
+              <Text style={[styles.velocitySubtext, { color: theme.textSecondary }]}>
+                At this rate, tasks that took 60 min will take ~{Math.round(60 * (1 - learningVelocity.velocity / 100))} min
+              </Text>
+            )}
+          </View>
+        )}
+
+        {profile.currentStreak && profile.currentStreak > 0 && (
+          <View style={[styles.streakCard, { backgroundColor: theme.surface, borderColor: theme.surfaceBorder }]}>
+            <View style={styles.streakContent}>
+              <Ionicons name="flame" size={24} color="#FF6B35" />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.streakValue, { color: theme.text }]}>{profile.currentStreak} day{profile.currentStreak > 1 ? 's' : ''}</Text>
+                <Text style={[styles.streakLabel, { color: theme.textSecondary }]}>Current Streak</Text>
+              </View>
+              {profile.longestStreak && profile.longestStreak > profile.currentStreak && (
+                <View style={[styles.streakRecord, { backgroundColor: theme.brandDim }]}>
+                  <Text style={[styles.streakRecordLabel, { color: theme.brand }]}>Record</Text>
+                  <Text style={[styles.streakRecordValue, { color: theme.brand }]}>{profile.longestStreak}</Text>
+                </View>
+              )}
+            </View>
+            {profile.subscriptionType === 'basic' && (
+              <Text style={[styles.streakTip, { color: theme.textSecondary, borderTopColor: theme.surfaceBorder }]}>
+                💡 Research shows: 2-3 sessions/day for 8 weeks = optimal results
+              </Text>
+            )}
+          </View>
+        )}
+
+        <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>Cognitive Profile</Text>
 
         <View style={styles.traitsGrid}>
           {traits.map((trait, i) => (
             <View key={i} style={[
               styles.traitCard,
-              isWeakest(trait.label) && styles.traitCardFocus,
-              isStagnant(trait.label) && styles.traitCardStagnant,
+              { backgroundColor: theme.surface, borderColor: theme.surfaceBorder },
+              isWeakest(trait.label) && { borderColor: theme.brandGlow, backgroundColor: theme.brandDim },
+              isStagnant(trait.label) && { borderColor: theme.warningDim },
             ]}>
               <View style={[styles.traitIconContainer, { backgroundColor: trait.color + '18' }]}>
                 <Ionicons name={trait.icon} size={20} color={trait.color} />
               </View>
-              <Text style={styles.traitValue}>{trait.value}</Text>
-              <Text style={styles.traitLabel}>{trait.label}</Text>
+              <Text style={[styles.traitValue, { color: theme.text }]}>{trait.value}</Text>
+              <Text style={[styles.traitLabel, { color: theme.textSecondary }]}>{trait.label}</Text>
               {isWeakest(trait.label) && (
-                <View style={styles.focusBadge}>
-                  <Text style={styles.focusBadgeText}>FOCUS</Text>
+                <View style={[styles.focusBadge, { backgroundColor: theme.brandDim }]}>
+                  <Text style={[styles.focusBadgeText, { color: theme.brand }]}>FOCUS</Text>
                 </View>
               )}
               {isStagnant(trait.label) && !isWeakest(trait.label) && (
-                <View style={styles.stagnantBadge}>
-                  <Text style={styles.stagnantBadgeText}>STAG</Text>
+                <View style={[styles.stagnantBadge, { backgroundColor: theme.warningDim }]}>
+                  <Text style={[styles.stagnantBadgeText, { color: theme.warning }]}>STAG</Text>
                 </View>
               )}
             </View>
@@ -177,30 +184,32 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.statsRow}>
-          <View style={styles.statCard}>
-            <Ionicons name="calendar" size={18} color={Colors.dark.tint} />
-            <Text style={styles.statValue}>{profile.totalSessions}</Text>
-            <Text style={styles.statLabel}>Total Sessions</Text>
+          <View style={[styles.statCard, { backgroundColor: theme.surface, borderColor: theme.surfaceBorder }]}>
+            <Ionicons name="calendar" size={18} color={theme.brand} />
+            <Text style={[styles.statValue, { color: theme.text }]}>{profile.totalSessions}</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Total Sessions</Text>
           </View>
-          <View style={styles.statCard}>
-            <Ionicons name="trophy" size={18} color={Colors.dark.warning} />
-            <Text style={styles.statValue}>{profile.level}/{profile.subscriptionType === 'premium' ? 50 : 20}</Text>
-            <Text style={styles.statLabel}>Level Progress</Text>
+          <View style={[styles.statCard, { backgroundColor: theme.surface, borderColor: theme.surfaceBorder }]}>
+            <Ionicons name="trophy" size={18} color={theme.warning} />
+            <Text style={[styles.statValue, { color: theme.text }]}>
+              {profile.level}/{profile.subscriptionType === 'premium' ? MAX_LEVEL : FREE_TIER_MAX_LEVEL}
+            </Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Level Progress</Text>
           </View>
         </View>
 
-        {profile.subscriptionType === 'basic' && (
+        {profile.subscriptionType !== 'premium' && (
           <Pressable
-            style={({ pressed }) => [styles.upgradeCard, pressed && { opacity: 0.85 }]}
+            style={({ pressed }) => [styles.upgradeCard, { backgroundColor: theme.accentDim, borderColor: theme.accentDim }, pressed && { opacity: 0.85 }]}
             onPress={() => setShowUpgradeModal(true)}
           >
             <View style={styles.upgradeContent}>
-              <Ionicons name="diamond" size={22} color={Colors.dark.accent} />
+              <Ionicons name="diamond" size={22} color={theme.accent} />
               <View style={{ flex: 1 }}>
-                <Text style={styles.upgradeTitle}>Unlock Premium</Text>
-                <Text style={styles.upgradeSubtext}>Unlimited sessions, Levels 21-50, advanced analytics</Text>
+                <Text style={[styles.upgradeTitle, { color: theme.text }]}>Unlock Premium</Text>
+                <Text style={[styles.upgradeSubtext, { color: theme.textSecondary }]}>Unlimited sessions, Level 100 mastery, advanced analytics</Text>
               </View>
-              <Text style={styles.upgradePrice}>$30/mo</Text>
+              <Text style={[styles.upgradePrice, { color: theme.accent }]}>$30/mo</Text>
             </View>
           </Pressable>
         )}
@@ -209,46 +218,48 @@ export default function HomeScreen() {
       </ScrollView>
 
       <Modal visible={showUpgradeModal} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+        <View style={[styles.modalOverlay, { backgroundColor: theme.overlay }]}>
+          <View style={[styles.modalContent, { backgroundColor: theme.surface, borderColor: theme.surfaceBorder }]}>
             <Pressable style={styles.modalClose} onPress={() => setShowUpgradeModal(false)}>
-              <Ionicons name="close" size={24} color={Colors.dark.textSecondary} />
+              <Ionicons name="close" size={24} color={theme.textSecondary} />
             </Pressable>
 
             <View style={styles.modalIconContainer}>
-              <Ionicons name="diamond" size={48} color={Colors.dark.accent} />
+              <Ionicons name="diamond" size={48} color={theme.accent} />
             </View>
 
-            <Text style={styles.modalTitle}>
-              {canStartSession ? 'Upgrade to Premium' : "You've reached today's training limit"}
+            <Text style={[styles.modalTitle, { color: theme.text }]}>
+              {canStartSession ? 'Upgrade to Premium' : "You've used today's free sessions"}
             </Text>
-            <Text style={styles.modalSubtext}>
-              Upgrade to Premium for unlimited sessions and Elite Levels.
+            <Text style={[styles.modalSubtext, { color: theme.textSecondary }]}>
+              {canStartSession
+                ? 'Unlock unlimited sessions, Level 100 mastery, and advanced analytics.'
+                : 'You get 3 free sessions per day. Upgrade for unlimited access and full mastery.'}
             </Text>
 
             <View style={styles.modalFeatures}>
               {[
-                'Unlimited daily sessions',
-                'Access to Levels 21-50',
-                'Advanced analytics dashboard',
-                'Faster adaptive scaling',
+                'Unlimited training sessions',
+                'Advanced AI difficulty scaling',
+                'Deep performance analytics',
+                'Full mastery (Level 100)',
               ].map((f, i) => (
                 <View key={i} style={styles.modalFeatureRow}>
-                  <Ionicons name="checkmark-circle" size={18} color={Colors.dark.success} />
-                  <Text style={styles.modalFeatureText}>{f}</Text>
+                  <Ionicons name="checkmark-circle" size={18} color={theme.success} />
+                  <Text style={[styles.modalFeatureText, { color: theme.text }]}>{f}</Text>
                 </View>
               ))}
             </View>
 
             <Pressable
-              style={({ pressed }) => [styles.upgradeButton, pressed && { opacity: 0.85 }]}
+              style={({ pressed }) => [styles.upgradeButton, { backgroundColor: theme.accent }, pressed && { opacity: 0.85 }]}
               onPress={() => setShowUpgradeModal(false)}
             >
               <Text style={styles.upgradeButtonText}>Upgrade - $30/month</Text>
             </Pressable>
 
             <Pressable onPress={() => setShowUpgradeModal(false)}>
-              <Text style={styles.modalDismiss}>Maybe later</Text>
+              <Text style={[styles.modalDismiss, { color: theme.textSecondary }]}>Maybe later</Text>
             </Pressable>
           </View>
         </View>
@@ -260,25 +271,68 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.dark.background,
+    // Background color set dynamically
   },
   scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 32,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 16,
+    marginBottom: 20,
+  },
+  iqBadge: {
+    marginTop: 12,
+    marginBottom: 8,
+    borderRadius: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+  },
+  iqRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  iqValue: {
+    fontFamily: 'Inter_900Black',
+    fontSize: 28,
+  },
+  iqLabel: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 10,
+    letterSpacing: 2,
+  },
+  levelProgressBar: {
+    height: 4,
+    width: 100,
+    borderRadius: 2,
+    marginLeft: 10,
+    overflow: 'hidden',
+  },
+  levelProgressFill: {
+    height: '100%',
+    borderRadius: 2,
   },
   greeting: {
     fontFamily: 'Inter_400Regular',
     fontSize: 14,
     color: Colors.dark.textSecondary,
-    marginBottom: 4,
+    marginBottom: 2,
     letterSpacing: 1,
     textTransform: 'uppercase',
+  },
+  personalizedSub: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 13,
+    color: Colors.dark.textSecondary,
+    lineHeight: 18,
+    marginBottom: 2,
+    maxWidth: 260,
   },
   levelRow: {
     flexDirection: 'row',
@@ -291,7 +345,7 @@ const styles = StyleSheet.create({
     color: Colors.dark.text,
   },
   levelBadge: {
-    backgroundColor: Colors.dark.tintDim,
+    backgroundColor: Colors.dark.brandDim,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 6,
@@ -299,7 +353,7 @@ const styles = StyleSheet.create({
   levelBadgeText: {
     fontFamily: 'Inter_600SemiBold',
     fontSize: 11,
-    color: Colors.dark.tint,
+    color: Colors.dark.brand,
     letterSpacing: 1,
     textTransform: 'uppercase',
   },
@@ -326,11 +380,11 @@ const styles = StyleSheet.create({
   },
   aiInsight: {
     backgroundColor: Colors.dark.surface,
-    borderRadius: 14,
+    borderRadius: 12,
     padding: 16,
-    marginBottom: 16,
+    marginBottom: 20,
     borderWidth: 1,
-    borderColor: Colors.dark.tint + '30',
+    borderColor: Colors.dark.surfaceBorder,
   },
   aiInsightHeader: {
     flexDirection: 'row',
@@ -341,7 +395,7 @@ const styles = StyleSheet.create({
   aiInsightTitle: {
     fontFamily: 'Inter_600SemiBold',
     fontSize: 13,
-    color: Colors.dark.tint,
+    color: Colors.dark.brand,
     letterSpacing: 1,
     textTransform: 'uppercase',
   },
@@ -353,7 +407,7 @@ const styles = StyleSheet.create({
   },
   aiInsightHighlight: {
     fontFamily: 'Inter_600SemiBold',
-    color: Colors.dark.tint,
+    color: Colors.dark.brand,
   },
   aiInsightMeta: {
     fontFamily: 'Inter_400Regular',
@@ -362,9 +416,12 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   startSessionButton: {
-    borderRadius: 20,
+    borderRadius: 14,
     overflow: 'hidden',
-    marginBottom: 28,
+    marginBottom: 24,
+    alignSelf: 'center',
+    width: '100%',
+    maxWidth: 320,
   },
   startSessionButtonPressed: {
     opacity: 0.9,
@@ -374,14 +431,14 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   startSessionGradient: {
-    paddingVertical: 28,
+    paddingVertical: 18,
     paddingHorizontal: 24,
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
   startSessionText: {
-    fontFamily: 'Inter_700Bold',
-    fontSize: 22,
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 17,
     color: '#0A0A0F',
   },
   startSessionTextDisabled: {
@@ -389,11 +446,100 @@ const styles = StyleSheet.create({
   },
   startSessionSub: {
     fontFamily: 'Inter_400Regular',
-    fontSize: 14,
+    fontSize: 13,
     color: 'rgba(10, 10, 15, 0.7)',
   },
   startSessionSubDisabled: {
     color: Colors.dark.textTertiary,
+  },
+  velocityCard: {
+    backgroundColor: Colors.dark.surface,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: Colors.dark.surfaceBorder,
+  },
+  velocityHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
+  velocityTitle: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 14,
+    color: Colors.dark.text,
+    flex: 1,
+  },
+  velocityValue: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 20,
+  },
+  velocityText: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 14,
+    color: Colors.dark.text,
+    lineHeight: 20,
+    marginBottom: 6,
+  },
+  velocitySubtext: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 12,
+    color: Colors.dark.textSecondary,
+    lineHeight: 16,
+  },
+  streakCard: {
+    backgroundColor: Colors.dark.surface,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: Colors.dark.surfaceBorder,
+  },
+  streakContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 8,
+  },
+  streakValue: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 20,
+    color: Colors.dark.text,
+  },
+  streakLabel: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 12,
+    color: Colors.dark.textSecondary,
+  },
+  streakRecord: {
+    backgroundColor: Colors.dark.brandDim,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  streakRecordLabel: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 10,
+    color: Colors.dark.brand,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  streakRecordValue: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 16,
+    color: Colors.dark.brand,
+  },
+  streakTip: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 12,
+    color: Colors.dark.textSecondary,
+    lineHeight: 16,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: Colors.dark.surfaceBorder,
   },
   sectionTitle: {
     fontFamily: 'Inter_600SemiBold',
@@ -419,8 +565,8 @@ const styles = StyleSheet.create({
     borderColor: Colors.dark.surfaceBorder,
   },
   traitCardFocus: {
-    borderColor: Colors.dark.tint + '60',
-    backgroundColor: Colors.dark.tintDim,
+    borderColor: Colors.dark.brand + '60',
+    backgroundColor: Colors.dark.brandDim,
   },
   traitCardStagnant: {
     borderColor: Colors.dark.warning + '40',
@@ -447,7 +593,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   focusBadge: {
-    backgroundColor: Colors.dark.tint + '30',
+    backgroundColor: Colors.dark.brand + '30',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
@@ -456,7 +602,7 @@ const styles = StyleSheet.create({
   focusBadgeText: {
     fontFamily: 'Inter_700Bold',
     fontSize: 8,
-    color: Colors.dark.tint,
+    color: Colors.dark.brand,
     letterSpacing: 1,
   },
   stagnantBadge: {
@@ -601,5 +747,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: Colors.dark.textSecondary,
     paddingVertical: 8,
+  },
   },
 });

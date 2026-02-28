@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useMemo } from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView, Platform, Animated } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,16 +7,47 @@ import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
 import { useUser } from '@/contexts/UserContext';
 import { ModuleScore, SessionLog } from '@/lib/storage';
-import { processSessionResults, calculateOverallAccuracy } from '@/lib/adaptive';
+import { processSessionResults, calculateOverallAccuracy, calculateIntelligenceIndices, updateStreak, calculateJojoIQ } from '@/lib/adaptive';
+import { generateLearningApplications, generateImmediateAction } from '@/lib/learning-applications';
+import { analyzePerformance } from '@/lib/gemini'; // J.A.R.V.I.S. Protocol
 
 export default function SessionCompleteScreen() {
+  const [jarvisInsight, setJarvisInsight] = React.useState<string | null>(null);
   const insets = useSafeAreaInsets();
-  const { scores: scoresParam } = useLocalSearchParams();
+  // ... (rest of hooks)
+
+  useEffect(() => {
+    // ... (existing useEffect for results processing)
+    if (!processedRef.current && profile) {
+      // Trigger J.A.R.V.I.S. analysis
+      const data = {
+        accuracy: overallAccuracy,
+        weakestTrait: analysis.weakestTrait.name
+      };
+      
+      analyzePerformance(profile, data).then(insight => {
+        if (insight) setJarvisInsight(insight);
+      });
+    }
+  }, [profile]); // ...
+
+  // RENDER (inside return):
+  // {jarvisInsight && (
+  //   <View style={styles.jarvisCard}>
+  //     <View style={styles.jarvisHeader}>
+  //       <Ionicons name="hardware-chip" size={24} color={Colors.dark.brand} />
+  //       <Text style={styles.jarvisTitle}>J.A.R.V.I.S. INSIGHT</Text>
+  //     </View>
+  //     <Text style={styles.jarvisText}>{jarvisInsight}</Text>
+  //   </View>
+  // )}
+  const { scores: scoresParam, nBackN, nBackAccuracy, memTier } = useLocalSearchParams();
   const { profile, updateProfile, addSessionLog, sessionLogs } = useUser();
   const processedRef = useRef(false);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const [adjustments, setAdjustments] = React.useState<{ trait: string; change: number; reason: string }[]>([]);
   const [leveledUp, setLeveledUp] = React.useState(false);
+  const [iqGain, setIqGain] = React.useState(0);
 
   const topPadding = Platform.OS === 'web' ? 67 : insets.top;
 
@@ -34,6 +65,17 @@ export default function SessionCompleteScreen() {
   };
 
   const overallAccuracy = calculateOverallAccuracy(moduleScores);
+  const intelligenceIndices = calculateIntelligenceIndices(moduleScores, profile?.level || 1);
+
+  const learningApps = useMemo(() => {
+    if (!profile) return [];
+    return generateLearningApplications(intelligenceIndices, profile.level);
+  }, [intelligenceIndices, profile?.level]);
+
+  const immediateAction = useMemo(() => {
+    if (!profile) return null;
+    return generateImmediateAction(intelligenceIndices, profile.level);
+  }, [intelligenceIndices, profile?.level]);
 
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 800, useNativeDriver: true }).start();
@@ -52,8 +94,47 @@ export default function SessionCompleteScreen() {
 
       setAdjustments(result.adjustments);
       setLeveledUp(result.leveledUp);
+      
+      const oldIQ = calculateJojoIQ(profile.level);
+      const newIQ = calculateJojoIQ(result.updatedProfile.level);
+      const iqDiff = newIQ - oldIQ;
+      setIqGain(iqDiff);
 
-      await updateProfile(result.updatedProfile);
+      // Recalculate intelligence indices with the UPDATED level (in case they leveled up)
+      const finalIndices = calculateIntelligenceIndices(moduleScores, result.updatedProfile.level);
+
+      // Update streak
+      const streakUpdate = updateStreak(profile);
+
+      // N-Back level progression: advance if accuracy >= 80%, regress if < 50%
+      const nBackNVal = nBackN ? parseInt(nBackN as string, 10) : 0;
+      const nBackAccVal = nBackAccuracy ? parseFloat(nBackAccuracy as string) : 0;
+      const memTierVal = memTier ? parseInt(memTier as string, 10) : 1;
+      let newNBackLevel = result.updatedProfile.nBackLevel ?? 2;
+      let newNBackBest = result.updatedProfile.nBackBest ?? 2;
+      if (nBackNVal > 0 && memTierVal >= 2) { // Accelerated: Match unlock tier
+        if (nBackAccVal >= 80 && nBackNVal >= newNBackLevel) {
+          newNBackLevel = Math.min(newNBackLevel + 1, 6);
+        } else if (nBackAccVal < 50 && newNBackLevel > 2) {
+          newNBackLevel = Math.max(newNBackLevel - 1, 2);
+        }
+        newNBackBest = Math.max(newNBackBest, newNBackLevel);
+      }
+
+      const profileWithIndices = {
+        ...result.updatedProfile,
+        reasoningIndex: finalIndices.reasoning,
+        spatialIndex: finalIndices.spatial,
+        fluidIndex: finalIndices.fluid,
+        crystallizedIndex: finalIndices.crystallized,
+        currentStreak: streakUpdate.currentStreak,
+        longestStreak: streakUpdate.longestStreak,
+        lastStreakDate: new Date().toDateString(),
+        nBackLevel: newNBackLevel,
+        nBackBest: newNBackBest,
+      };
+
+      await updateProfile(profileWithIndices);
 
       const avgReactionTime = Object.values(moduleScores)
         .filter(m => m.questionsAnswered > 0)
@@ -69,6 +150,7 @@ export default function SessionCompleteScreen() {
         traitAdjustments: result.adjustments,
         levelBefore: profile.level,
         levelAfter: result.updatedProfile.level,
+        intelligenceIndices: finalIndices,
       };
 
       await addSessionLog(sessionLog);
@@ -78,7 +160,7 @@ export default function SessionCompleteScreen() {
   }, [profile]);
 
   const moduleDisplay = [
-    { key: 'pattern', name: 'Pattern Density', icon: 'grid', color: '#00D4FF' },
+    { key: 'pattern', name: 'Pattern Density', icon: 'grid', color: Colors.dark.brand },
     { key: 'memory', name: 'Memory Stretch', icon: 'layers', color: '#7B61FF' },
     { key: 'ruleMutation', name: 'Rule Mutation', icon: 'shuffle', color: '#00E676' },
     { key: 'dualTask', name: 'Dual-Task', icon: 'git-merge', color: '#FFB74D' },
@@ -97,16 +179,114 @@ export default function SessionCompleteScreen() {
 
           {leveledUp && (
             <View style={styles.levelUpBanner}>
-              <Ionicons name="arrow-up-circle" size={20} color={Colors.dark.tint} />
+              <Ionicons name="arrow-up-circle" size={20} color={Colors.dark.brand} />
               <Text style={styles.levelUpText}>Level Up!</Text>
             </View>
           )}
 
           <View style={styles.scoreCircle}>
-            <Text style={styles.scoreValue}>{Math.round(overallAccuracy)}%</Text>
-            <Text style={styles.scoreLabel}>Overall</Text>
+            <Text style={styles.scoreValue}>{calculateJojoIQ(profile?.level || 1)}</Text>
+            <Text style={styles.scoreLabel}>JOJO IQ</Text>
+            {leveledUp && (
+              <View style={styles.iqGainBadge}>
+                <Text style={styles.iqGainText}>+1</Text>
+              </View>
+            )}
           </View>
 
+          {/* Use growth-oriented framing for early users (level < 20); IQ framing for advanced */}
+          {(profile?.level ?? 1) < 20 ? (
+            <View style={styles.growthSectionHeader}>
+              <Ionicons name="trending-up" size={16} color={Colors.dark.success} />
+              <Text style={[styles.sectionTitle, { marginBottom: 0, alignSelf: 'center' }]}>Your Cognitive Growth</Text>
+            </View>
+          ) : (
+            <Text style={styles.sectionTitle}>Intelligence Matrix</Text>
+          )}
+
+          {(profile?.level ?? 1) < 20 && (
+            <Text style={styles.growthSubtitle}>
+              These scores grow every session. You're building real cognitive strength.
+            </Text>
+          )}
+
+          <View style={styles.intelGrid}>
+            <View style={styles.intelItem}>
+              <View style={styles.intelHeader}>
+                <Ionicons name="bulb" size={16} color="#FFB74D" />
+                <Text style={styles.intelLabel}>Reasoning</Text>
+              </View>
+              <Text style={styles.intelValue}>{Math.round(intelligenceIndices.reasoning)}</Text>
+              <Text style={styles.intelDesc}>
+                {(profile?.level ?? 1) < 20 ? 'Logic & problem-solving' : 'Problem solving & logic'}
+              </Text>
+            </View>
+            <View style={styles.intelItem}>
+              <View style={styles.intelHeader}>
+                <Ionicons name="cube" size={16} color="#00D4FF" />
+                <Text style={styles.intelLabel}>Spatial</Text>
+              </View>
+              <Text style={styles.intelValue}>{Math.round(intelligenceIndices.spatial)}</Text>
+              <Text style={styles.intelDesc}>
+                {(profile?.level ?? 1) < 20 ? 'Seeing patterns & shapes' : 'Visual-spatial reasoning'}
+              </Text>
+            </View>
+            <View style={styles.intelItem}>
+              <View style={styles.intelHeader}>
+                <Ionicons name="water" size={16} color="#7B61FF" />
+                <Text style={styles.intelLabel}>Fluid</Text>
+              </View>
+              <Text style={styles.intelValue}>{Math.round(intelligenceIndices.fluid)}</Text>
+              <Text style={styles.intelDesc}>
+                {(profile?.level ?? 1) < 20 ? 'Handling new challenges' : 'Novel problem solving'}
+              </Text>
+            </View>
+            <View style={styles.intelItem}>
+              <View style={styles.intelHeader}>
+                <Ionicons name="library" size={16} color="#00E676" />
+                <Text style={styles.intelLabel}>Crystallized</Text>
+              </View>
+              <Text style={styles.intelValue}>{Math.round(intelligenceIndices.crystallized)}</Text>
+              <Text style={styles.intelDesc}>
+                {(profile?.level ?? 1) < 20 ? 'Applying what you know' : 'Knowledge application'}</Text>
+            </View>
+          </View>
+
+          {nBackN && parseInt(nBackN as string) > 0 && (
+            <View style={styles.nBackResultCard}>
+              <View style={styles.nBackResultHeader}>
+                <Ionicons name="layers" size={18} color="#7B61FF" />
+                <Text style={styles.nBackResultTitle}>Dual N-Back Result</Text>
+                <View style={styles.nBackBadge}>
+                  <Text style={styles.nBackBadgeText}>{nBackN}-Back</Text>
+                </View>
+              </View>
+              <View style={styles.nBackResultRow}>
+                <Text style={styles.nBackResultLabel}>Accuracy</Text>
+                <Text style={[
+                  styles.nBackResultValue,
+                  {
+                    color: parseFloat(nBackAccuracy as string) >= 80
+                      ? Colors.dark.success
+                      : parseFloat(nBackAccuracy as string) >= 50
+                        ? Colors.dark.warning
+                        : Colors.dark.error,
+                  },
+                ]}>
+                  {nBackAccuracy}%
+                </Text>
+              </View>
+              <Text style={styles.nBackResultHint}>
+                {parseFloat(nBackAccuracy as string) >= 80
+                  ? 'Outstanding! N-Back level will advance next session.'
+                  : parseFloat(nBackAccuracy as string) >= 50
+                    ? 'Good effort. Keep practicing to advance.'
+                    : 'Level will adjust down to optimise your training.'}
+              </Text>
+            </View>
+          )}
+
+          <Text style={styles.sectionTitle}>Module Performance</Text>
           <View style={styles.moduleResults}>
             {moduleDisplay.map(mod => {
               const s = moduleScores[mod.key as keyof typeof moduleScores];
@@ -136,7 +316,7 @@ export default function SessionCompleteScreen() {
             })}
           </View>
 
-          {adjustments.length > 0 && (
+          {adjustments.length > 0 && profile?.subscriptionType === 'premium' && (
             <>
               <Text style={styles.adjustTitle}>Adaptive Adjustments</Text>
               <View style={styles.adjustmentsList}>
@@ -157,9 +337,18 @@ export default function SessionCompleteScreen() {
             </>
           )}
 
+          {profile?.subscriptionType !== 'premium' && (
+            <View style={styles.freeTierMessage}>
+              <Ionicons name="time-outline" size={18} color={Colors.dark.textSecondary} />
+              <Text style={styles.freeTierMessageText}>
+                Your next session unlocks in 24 hours. Upgrade for unlimited access.
+              </Text>
+            </View>
+          )}
+
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
-              <Ionicons name="timer" size={18} color={Colors.dark.tint} />
+              <Ionicons name="timer" size={18} color={Colors.dark.brand} />
               <Text style={styles.statItemValue}>
                 {(
                   Object.values(moduleScores)
@@ -186,6 +375,39 @@ export default function SessionCompleteScreen() {
               <Text style={styles.statItemLabel}>Correct</Text>
             </View>
           </View>
+
+          {immediateAction && (
+            <View style={styles.immediateActionCard}>
+              <View style={styles.immediateActionHeader}>
+                <Ionicons name={immediateAction.icon as any} size={20} color={Colors.dark.brand} />
+                <Text style={styles.immediateActionTitle}>{immediateAction.title}</Text>
+              </View>
+              <Text style={styles.immediateActionText}>{immediateAction.action}</Text>
+            </View>
+          )}
+
+          <Text style={styles.sectionTitle}>Apply Your Enhanced Cognition</Text>
+          {learningApps.map((app, index) => (
+            <View key={index} style={styles.learningAppCard}>
+              <View style={styles.learningAppHeader}>
+                <View style={[styles.learningAppIconBg, { backgroundColor: app.color + '18' }]}>
+                  <Ionicons name={app.icon as any} size={20} color={app.color} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.learningAppTitle}>{app.title}</Text>
+                  <Text style={styles.learningAppExplanation}>{app.explanation}</Text>
+                </View>
+              </View>
+              <View style={styles.learningAppTips}>
+                {app.tips.map((tip, i) => (
+                  <View key={i} style={styles.learningAppTipRow}>
+                    <Ionicons name="checkmark-circle" size={14} color={Colors.dark.success} />
+                    <Text style={styles.learningAppTip}>{tip}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          ))}
 
           <Pressable
             style={({ pressed }) => [styles.doneButton, pressed && { opacity: 0.85 }]}
@@ -226,18 +448,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: Colors.dark.tintDim,
+    backgroundColor: Colors.dark.brandDim,
     paddingHorizontal: 18,
     paddingVertical: 10,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: Colors.dark.tintGlow,
+    borderColor: Colors.dark.brand,
     marginBottom: 16,
   },
   levelUpText: {
     fontFamily: 'Inter_700Bold',
     fontSize: 18,
-    color: Colors.dark.tint,
+    color: Colors.dark.brand,
   },
   scoreCircle: {
     width: 130,
@@ -247,13 +469,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 3,
-    borderColor: Colors.dark.tint,
+    borderColor: Colors.dark.brand,
     marginBottom: 28,
   },
   scoreValue: {
     fontFamily: 'Inter_700Bold',
     fontSize: 36,
-    color: Colors.dark.tint,
+    color: Colors.dark.brand,
   },
   scoreLabel: {
     fontFamily: 'Inter_400Regular',
@@ -261,6 +483,70 @@ const styles = StyleSheet.create({
     color: Colors.dark.textSecondary,
     textTransform: 'uppercase',
     letterSpacing: 1,
+  },
+  iqGainBadge: {
+    position: 'absolute',
+    top: -10,
+    right: -10,
+    backgroundColor: Colors.dark.success,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderWidth: 2,
+    borderColor: Colors.dark.background,
+  },
+  iqGainText: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 14,
+    color: '#0A0A0F',
+  },
+  sectionTitle: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 14,
+    color: Colors.dark.textSecondary,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    alignSelf: 'flex-start',
+    marginBottom: 12,
+  },
+  intelGrid: {
+    width: '100%',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginBottom: 28,
+    gap: 10,
+  },
+  intelItem: {
+    width: '48%',
+    backgroundColor: Colors.dark.surface,
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: Colors.dark.surfaceBorder,
+  },
+  intelHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+  },
+  intelLabel: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 13,
+    color: Colors.dark.textSecondary,
+  },
+  intelValue: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 28,
+    color: Colors.dark.text,
+    marginBottom: 4,
+  },
+  intelDesc: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 11,
+    color: Colors.dark.textTertiary,
+    lineHeight: 14,
   },
   moduleResults: {
     width: '100%',
@@ -345,6 +631,24 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.dark.textSecondary,
   },
+  freeTierMessage: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: Colors.dark.surface,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: Colors.dark.surfaceBorder,
+  },
+  freeTierMessageText: {
+    flex: 1,
+    fontFamily: 'Inter_400Regular',
+    fontSize: 14,
+    color: Colors.dark.textSecondary,
+    lineHeight: 20,
+  },
   statsRow: {
     flexDirection: 'row',
     gap: 10,
@@ -372,7 +676,7 @@ const styles = StyleSheet.create({
     color: Colors.dark.textSecondary,
   },
   doneButton: {
-    backgroundColor: Colors.dark.tint,
+    backgroundColor: Colors.dark.brand,
     paddingVertical: 16,
     paddingHorizontal: 48,
     borderRadius: 14,
@@ -383,5 +687,172 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
     fontSize: 17,
     color: '#0A0A0F',
+  },
+  immediateActionCard: {
+    width: '100%',
+    backgroundColor: Colors.dark.brandDim,
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: Colors.dark.brand,
+    marginBottom: 28,
+  },
+  immediateActionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
+  immediateActionTitle: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 16,
+    color: Colors.dark.brand,
+    flex: 1,
+  },
+  immediateActionText: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 14,
+    color: Colors.dark.text,
+    lineHeight: 20,
+  },
+  learningAppCard: {
+    width: '100%',
+    backgroundColor: Colors.dark.surface,
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: Colors.dark.surfaceBorder,
+    marginBottom: 14,
+  },
+  learningAppHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginBottom: 14,
+  },
+  learningAppIconBg: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  learningAppTitle: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 16,
+    color: Colors.dark.text,
+    marginBottom: 4,
+  },
+  learningAppExplanation: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 13,
+    color: Colors.dark.textSecondary,
+    lineHeight: 18,
+  },
+  learningAppTips: {
+    gap: 10,
+  },
+  learningAppTipRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  learningAppTip: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 14,
+    color: Colors.dark.text,
+    lineHeight: 20,
+    flex: 1,
+  },
+  nBackResultCard: {
+    backgroundColor: '#7B61FF18',
+    borderRadius: 16,
+    padding: 16,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: '#7B61FF40',
+    marginBottom: 4,
+  },
+  nBackResultHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  nBackResultTitle: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 15,
+    color: Colors.dark.text,
+    flex: 1,
+  },
+  nBackBadge: {
+    backgroundColor: '#7B61FF',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  nBackBadgeText: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 11,
+    color: '#fff',
+  },
+  nBackResultRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  nBackResultLabel: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 14,
+    color: Colors.dark.textSecondary,
+  },
+  nBackResultValue: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 22,
+  },
+  nBackResultHint: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 13,
+    color: Colors.dark.textTertiary,
+    lineHeight: 18,
+  },
+  growthSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    marginBottom: -4,
+  },
+  growthSubtitle: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 13,
+    color: Colors.dark.textSecondary,
+    lineHeight: 18,
+    marginBottom: 4,
+  },
+  jarvisCard: {
+    backgroundColor: '#0F172A',
+    borderColor: '#00F0FF',
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+    gap: 8,
+  },
+  jarvisHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  jarvisTitle: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 14,
+    color: '#00F0FF',
+    letterSpacing: 1.5,
+  },
+  jarvisText: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 15,
+    color: '#E2E8F0',
+    lineHeight: 22,
   },
 });

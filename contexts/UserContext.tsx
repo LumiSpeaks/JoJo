@@ -41,8 +41,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateProfile = async (updates: Partial<UserProfile>) => {
-    if (!profile) return;
-    const updated = { ...profile, ...updates };
+    const base = profile ?? createDefaultProfile();
+    const updated = { ...base, ...updates } as UserProfile;
     await saveUserProfile(updated);
     setProfile(updated);
   };

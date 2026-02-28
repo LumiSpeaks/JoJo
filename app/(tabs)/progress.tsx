@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Colors from '@/constants/colors';
 import { useUser } from '@/contexts/UserContext';
+import { MAX_LEVEL } from '@/lib/constants';
 
 const { width } = Dimensions.get('window');
 
@@ -22,7 +23,7 @@ function RadarChart({ values, labels, colors }: { values: number[]; labels: stri
     };
   };
 
-  const maxVal = 20;
+  const maxVal = MAX_LEVEL;
 
   return (
     <View style={[styles.radarContainer, { width: size, height: size }]}>
@@ -186,11 +187,11 @@ export default function ProgressScreen() {
                 <View
                   style={[
                     styles.levelProgressFill,
-                    { width: `${Math.min(100, (profile.level / 50) * 100)}%` },
+                    { width: `${Math.min(100, (profile.level / MAX_LEVEL) * 100)}%` },
                   ]}
                 />
               </View>
-              <Text style={styles.levelProgressText}>{profile.level} / 50</Text>
+              <Text style={styles.levelProgressText}>{profile.level} / {MAX_LEVEL}</Text>
             </View>
           </View>
         </View>
@@ -208,7 +209,7 @@ export default function ProgressScreen() {
         <Text style={styles.sectionTitle}>Overall Stats</Text>
         <View style={styles.overallStatsGrid}>
           <View style={styles.overallStatCard}>
-            <Ionicons name="flame" size={20} color={Colors.dark.tint} />
+            <Ionicons name="flame" size={20} color={Colors.dark.brand} />
             <Text style={styles.overallStatValue}>{profile.totalSessions}</Text>
             <Text style={styles.overallStatLabel}>Sessions</Text>
           </View>
@@ -234,7 +235,7 @@ export default function ProgressScreen() {
                 style={[
                   styles.traitDetailBarFill,
                   {
-                    width: `${Math.min(100, (radarValues[i] / 20) * 100)}%`,
+                    width: `${Math.min(100, (radarValues[i] / MAX_LEVEL) * 100)}%`,
                     backgroundColor: radarColors[i],
                   },
                 ]}
@@ -288,7 +289,7 @@ const styles = StyleSheet.create({
   levelCardValue: {
     fontFamily: 'Inter_700Bold',
     fontSize: 42,
-    color: Colors.dark.tint,
+    color: Colors.dark.brand,
   },
   levelProgressContainer: {
     flex: 1,
@@ -303,7 +304,7 @@ const styles = StyleSheet.create({
   },
   levelProgressFill: {
     height: '100%',
-    backgroundColor: Colors.dark.tint,
+    backgroundColor: Colors.dark.brand,
     borderRadius: 4,
   },
   levelProgressText: {

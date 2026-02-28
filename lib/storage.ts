@@ -1,5 +1,35 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+/** Stored answers from the onboarding questionnaire (learning capacity & goals). */
+export interface OnboardingAnswers {
+  /** e.g. "slow-to-grasp" | "forget-quickly" | "easily-distracted" | "want-faster" */
+  learningSituation?: string;
+  /** e.g. ["short-focus", "overload", "slow-processing", "poor-retention"] */
+  learningChallenges?: string[];
+  /** e.g. "speed" | "memory" | "patterns" | "focus" | "all" */
+  learningArea?: string;
+  /** e.g. "less-time" | "retain-more" | "focus-under-pressure" | "think-faster" | "habit" */
+  learningGoal?: string;
+  /** e.g. "frustrated" | "behind" | "stuck" | "okay-want-better" | "worried" */
+  futureIfNoChange?: string;
+  /** e.g. "every-day" | "most-days" | "few-times-week" | "when-deadline" */
+  studyFrequency?: string;
+  /** e.g. ["short-sessions", "adaptive-difficulty", "clear-progress", "variety"] */
+  whatWouldHelp?: string[];
+}
+
+/** Higher-order intelligence indices derived from module performance. */
+export interface IntelligenceIndices {
+  /** Composite reasoning / problem-solving score (0–100). */
+  reasoning: number;
+  /** Composite spatial / visual reasoning score (0–100). */
+  spatial: number;
+  /** Composite fluid intelligence proxy (0–100). */
+  fluid: number;
+  /** Composite crystallized intelligence proxy (0–100). */
+  crystallized: number;
+}
+
 export interface UserProfile {
   id: string;
   level: number;
@@ -13,8 +43,33 @@ export interface UserProfile {
   sessionsToday: number;
   lastSessionDate: string;
   baselineCompleted: boolean;
+  /** When true, user has completed the initial goal/clarity questionnaire. */
+  questionnaireCompleted: boolean;
+  /** Answers from the onboarding questionnaire; used to adapt the experience. */
+  onboardingAnswers?: OnboardingAnswers;
   totalSessions: number;
   createdAt: string;
+  /** Higher-order intelligence indices (0–100), derived from modules. */
+  reasoningIndex?: number;
+  spatialIndex?: number;
+  fluidIndex?: number;
+  crystallizedIndex?: number;
+  /** Consecutive days trained (for streak tracking). */
+  currentStreak?: number;
+  /** Longest streak ever achieved. */
+  longestStreak?: number;
+  /** Last date streak was updated. */
+  lastStreakDate?: string;
+  /** Current Dual N-Back level (2 = 2-back, 3 = 3-back, etc.) */
+  nBackLevel?: number;
+  /** Best N-Back level ever achieved. */
+  nBackBest?: number;
+  /** App Theme preference */
+  theme?: 'system' | 'light' | 'dark';
+  /** App Language preference */
+  language?: 'en' | 'es' | 'fr' | 'de' | 'zh' | 'ja' | 'ru';
+  /** J.A.R.V.I.S. Protocol: Strict Mode (Fail session if accuracy < 80%) */
+  strictMode?: boolean;
 }
 
 export interface SessionLog {
@@ -32,6 +87,8 @@ export interface SessionLog {
   traitAdjustments: TraitAdjustment[];
   levelBefore: number;
   levelAfter: number;
+  /** Higher-order intelligence indices for this session. */
+  intelligenceIndices?: IntelligenceIndices;
 }
 
 export interface ModuleScore {
@@ -68,8 +125,21 @@ export function createDefaultProfile(): UserProfile {
     sessionsToday: 0,
     lastSessionDate: '',
     baselineCompleted: false,
+    questionnaireCompleted: false,
     totalSessions: 0,
     createdAt: new Date().toISOString(),
+    reasoningIndex: 0,
+    spatialIndex: 0,
+    fluidIndex: 0,
+    crystallizedIndex: 0,
+    currentStreak: 0,
+    longestStreak: 0,
+    lastStreakDate: '',
+    nBackLevel: 2,
+    nBackBest: 2,
+    theme: 'system',
+    language: 'en',
+    strictMode: false,
   };
 }
 
@@ -77,6 +147,28 @@ export async function getUserProfile(): Promise<UserProfile | null> {
   const data = await AsyncStorage.getItem(KEYS.USER_PROFILE);
   if (!data) return null;
   const profile: UserProfile = JSON.parse(data);
+  if (profile.questionnaireCompleted === undefined) {
+    profile.questionnaireCompleted = false;
+  }
+  if (profile.reasoningIndex === undefined) {
+    profile.reasoningIndex = 0;
+    profile.spatialIndex = 0;
+    profile.fluidIndex = 0;
+    profile.crystallizedIndex = 0;
+  }
+  if (profile.currentStreak === undefined) {
+    profile.currentStreak = 0;
+    profile.longestStreak = 0;
+    profile.lastStreakDate = '';
+  }
+  if (profile.nBackLevel === undefined) {
+    profile.nBackLevel = 2;
+    profile.nBackBest = 2;
+  }
+  if (profile.theme === undefined) profile.theme = 'system';
+  if (profile.language === undefined) profile.language = 'en';
+  if (profile.strictMode === undefined) profile.strictMode = false;
+
   const today = new Date().toDateString();
   if (profile.lastSessionDate !== today) {
     profile.sessionsToday = 0;

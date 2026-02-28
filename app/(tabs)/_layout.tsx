@@ -6,6 +6,7 @@ import { Platform, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import Colors from "@/constants/colors";
+import { useThemeColors } from "@/hooks/useThemeColors";
 
 function NativeTabLayout() {
   return (
@@ -18,6 +19,10 @@ function NativeTabLayout() {
         <Icon sf={{ default: "chart.bar", selected: "chart.bar.fill" }} />
         <Label>Progress</Label>
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="settings">
+        <Icon sf={{ default: "gear", selected: "gear.circle.fill" }} />
+        <Label>Settings</Label>
+      </NativeTabs.Trigger>
     </NativeTabs>
   );
 }
@@ -25,18 +30,19 @@ function NativeTabLayout() {
 function ClassicTabLayout() {
   const isWeb = Platform.OS === "web";
   const isIOS = Platform.OS === "ios";
+  const theme = useThemeColors();
 
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: Colors.dark.tint,
-        tabBarInactiveTintColor: Colors.dark.tabIconDefault,
+        tabBarActiveTintColor: theme.brand,
+        tabBarInactiveTintColor: theme.textTertiary,
         tabBarStyle: {
           position: "absolute",
-          backgroundColor: isIOS ? "transparent" : Colors.dark.background,
+          backgroundColor: isIOS ? "transparent" : theme.background,
           borderTopWidth: isWeb ? 1 : 0,
-          borderTopColor: Colors.dark.surfaceBorder,
+          borderTopColor: theme.surfaceBorder,
           elevation: 0,
           ...(isWeb ? { height: 84 } : {}),
         },
@@ -44,11 +50,11 @@ function ClassicTabLayout() {
           isIOS ? (
             <BlurView
               intensity={100}
-              tint="dark"
+              tint={theme.background === Colors.light.background ? "light" : "dark"}
               style={StyleSheet.absoluteFill}
             />
           ) : isWeb ? (
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: Colors.dark.background }]} />
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.background }]} />
           ) : null,
       }}
     >
@@ -67,6 +73,15 @@ function ClassicTabLayout() {
           title: "Progress",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="bar-chart" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: "Settings",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="settings" size={size} color={color} />
           ),
         }}
       />

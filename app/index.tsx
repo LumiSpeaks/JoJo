@@ -10,9 +10,7 @@ export default function IndexScreen() {
   useEffect(() => {
     if (isLoading) return;
 
-    if (!profile) {
-      router.replace('/onboarding');
-    } else if (!profile.baselineCompleted) {
+    if (!profile || !profile.questionnaireCompleted || !profile.baselineCompleted) {
       router.replace('/onboarding');
     } else {
       router.replace('/(tabs)');
@@ -21,7 +19,7 @@ export default function IndexScreen() {
 
   return (
     <View style={styles.container}>
-      <ActivityIndicator size="large" color={Colors.dark.tint} />
+      <ActivityIndicator size="large" color={Colors.dark.brand} />
     </View>
   );
 }

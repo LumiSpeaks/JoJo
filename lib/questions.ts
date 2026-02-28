@@ -25,84 +25,228 @@ export interface PatternQuestion {
   options: { shape: string; color: string }[];
   correctIndex: number;
   transformationCount: number;
+  ruleHint: string;
+  schemeName: string;
 }
 
+// Named rule schemes — each produces a distinct, learnable pattern logic
+type PatternScheme =
+  | 'rowCycle'    // Row offset controls shape; row index controls color
+  | 'colColor'    // Column determines color; (row+col) determines shape
+  | 'oddEven'     // Parity of (row+col) switches between two shape+color sets
+  | 'rowCol'      // Row → shape, column → color independently
+  | 'progressive' // Shapes count up reading left-to-right, top-to-bottom
+  | 'diagonal'    // Diagonal cells share a distinct color
+  | 'mirror'      // Right half mirrors left half with a color shift
+  | 'layered';    // High-tier multi-rule compound system (tier 8+)
+
+const SCHEME_HINTS: Record<PatternScheme, string> = {
+  rowCycle:    'Each row cycles shapes in a different order',
+  colColor:    'Each column has its own color',
+  oddEven:     'Alternating positions follow different rules',
+  rowCol:      'Row controls shape · column controls color',
+  progressive: 'Shapes count up across the grid',
+  diagonal:    'Diagonal cells share a special color',
+  mirror:      'Right half mirrors left with a color change',
+  layered:     'Multiple transformation rules active',
+};
+
+const SCHEME_LABELS: Record<PatternScheme, string> = {
+  rowCycle:    'Row Cycle',
+  colColor:    'Column Color',
+  oddEven:     'Alternating',
+  rowCol:      'Row × Column',
+  progressive: 'Progressive',
+  diagonal:    'Diagonal Rule',
+  mirror:      'Mirror',
+  layered:     'Multi-Layer',
+};
+
 export function generatePatternQuestion(patternTier: number, stagnationMode: string | null): PatternQuestion {
-  const layerCount = Math.min(6, 1 + Math.floor(patternTier / 3));
-  const shapePool = pick(SHAPES, Math.min(SHAPES.length, 2 + Math.floor(patternTier / 4)));
-  const colorPool = pick(SHAPE_COLORS, Math.min(SHAPE_COLORS.length, 2 + Math.floor(patternTier / 5)));
+  const gridSize = patternTier >= 12 ? 4 : 3;
+  const numShapes = Math.min(SHAPES.length, 2 + Math.floor(patternTier / 3));
+  const numColors = Math.min(SHAPE_COLORS.length, 2 + Math.floor(patternTier / 4));
+  const shapePool = pick(SHAPES, numShapes);
+  const colorPool = pick(SHAPE_COLORS, numColors);
 
-  const gridSize = patternTier >= 15 ? 4 : 3;
-  const grid: { shape: string; color: string }[][] = [];
-  const baseS = randInt(0, shapePool.length - 1);
-  const baseC = randInt(0, colorPool.length - 1);
+  // Schemes unlock progressively; at each tier multiple are available so
+  // questions vary even at the same tier
+  const available: PatternScheme[] = ['rowCycle'];
+  if (patternTier >= 2) available.push('colColor');
+  if (patternTier >= 3) available.push('oddEven');
+  if (patternTier >= 4) available.push('rowCol');
+  if (patternTier >= 5) available.push('mirror');
+  if (patternTier >= 6) available.push('progressive');
+  if (patternTier >= 7) available.push('diagonal');
+  if (patternTier >= 8) available.push('layered');
 
-  const useRotation = layerCount >= 1;
-  const useColorShift = layerCount >= 2;
-  const useMirror = layerCount >= 3;
-  const useSubstitution = layerCount >= 4;
-  const useDiagonal = layerCount >= 5;
-  const usePositionalShift = layerCount >= 6;
-
-  for (let row = 0; row < gridSize; row++) {
-    grid[row] = [];
-    for (let col = 0; col < gridSize; col++) {
-      if (row === gridSize - 1 && col === gridSize - 1) {
-        grid[row][col] = { shape: '?', color: '#5A5A68' };
-        continue;
-      }
-
-      let sIdx = baseS;
-      let cIdx = baseC;
-
-      if (useRotation) sIdx = (baseS + row + col) % shapePool.length;
-      if (useColorShift) cIdx = (baseC + row) % colorPool.length;
-      if (useMirror && col >= Math.floor(gridSize / 2)) sIdx = (sIdx + gridSize - col) % shapePool.length;
-      if (useSubstitution && row % 2 === 1) sIdx = (sIdx + 1) % shapePool.length;
-      if (useDiagonal && row === col) cIdx = (cIdx + 2) % colorPool.length;
-      if (usePositionalShift) cIdx = (baseC + row + col) % colorPool.length;
-
-      if (stagnationMode === 'variant') {
-        sIdx = (sIdx + row * col) % shapePool.length;
-      }
-
-      grid[row][col] = { shape: shapePool[sIdx], color: colorPool[cIdx] };
-    }
+  let scheme: PatternScheme;
+  if (stagnationMode === 'variant' || stagnationMode === 'formatChange') {
+    // Force a harder / different scheme when stagnating
+    scheme = available[available.length - 1];
+  } else {
+    scheme = available[randInt(0, available.length - 1)];
   }
 
-  let correctSIdx = baseS;
-  let correctCIdx = baseC;
+  const ruleHint = SCHEME_HINTS[scheme];
+  const schemeName = SCHEME_LABELS[scheme];
+
+  // ── Cell function for non-layered schemes ─────────────────────────────────
+  const cellOf = (row: number, col: number): { shape: string; color: string } => {
+    switch (scheme) {
+      case 'rowCycle': {
+        // Row determines the starting offset for shape cycling
+        const sIdx = (row + col) % shapePool.length;
+        const cIdx = row % colorPool.length;
+        return { shape: shapePool[sIdx], color: colorPool[cIdx] };
+      }
+      case 'colColor': {
+        const sIdx = (row + col) % shapePool.length;
+        const cIdx = col % colorPool.length;
+        return { shape: shapePool[sIdx], color: colorPool[cIdx] };
+      }
+      case 'oddEven': {
+        // Even/odd parity of (row+col) picks from two distinct sets
+        const parity = (row + col) % 2;
+        const sIdx = parity === 0 ? 0 : Math.min(1, shapePool.length - 1);
+        const cIdx = parity === 0 ? 0 : Math.min(1, colorPool.length - 1);
+        return { shape: shapePool[sIdx], color: colorPool[cIdx] };
+      }
+      case 'rowCol': {
+        // Independent axes — row picks shape, col picks color
+        const sIdx = row % shapePool.length;
+        const cIdx = col % colorPool.length;
+        return { shape: shapePool[sIdx], color: colorPool[cIdx] };
+      }
+      case 'progressive': {
+        // Shapes count forward reading left-to-right, top-to-bottom
+        const step = row * gridSize + col;
+        const sIdx = step % shapePool.length;
+        const cIdx = row % colorPool.length;
+        return { shape: shapePool[sIdx], color: colorPool[cIdx] };
+      }
+      case 'diagonal': {
+        // On the main diagonal (row===col) the color is special
+        const sIdx = (row + col) % shapePool.length;
+        const onDiag = row === col;
+        const cIdx = onDiag
+          ? Math.min(colorPool.length - 1, colorPool.length - 1)
+          : (row + 1) % colorPool.length;
+        return { shape: shapePool[sIdx], color: colorPool[cIdx] };
+      }
+      case 'mirror': {
+        // Left half drives the rule; right half mirrors shape but shifts color by +1
+        const mirrorCol = col >= Math.floor(gridSize / 2) ? gridSize - 1 - col : col;
+        const sIdx = (row + mirrorCol) % shapePool.length;
+        const cIdx = col >= Math.floor(gridSize / 2)
+          ? (row + 1) % colorPool.length
+          : row % colorPool.length;
+        return { shape: shapePool[sIdx], color: colorPool[cIdx] };
+      }
+      default:
+        return { shape: shapePool[0], color: colorPool[0] };
+    }
+  };
+
+  // ── Build grid ─────────────────────────────────────────────────────────────
   const lastRow = gridSize - 1;
   const lastCol = gridSize - 1;
 
-  if (useRotation) correctSIdx = (baseS + lastRow + lastCol) % shapePool.length;
-  if (useColorShift) correctCIdx = (baseC + lastRow) % colorPool.length;
-  if (useMirror && lastCol >= Math.floor(gridSize / 2)) correctSIdx = (correctSIdx + gridSize - lastCol) % shapePool.length;
-  if (useSubstitution && lastRow % 2 === 1) correctSIdx = (correctSIdx + 1) % shapePool.length;
-  if (useDiagonal && lastRow === lastCol) correctCIdx = (correctCIdx + 2) % colorPool.length;
-  if (usePositionalShift) correctCIdx = (baseC + lastRow + lastCol) % colorPool.length;
-  if (stagnationMode === 'variant') correctSIdx = (correctSIdx + lastRow * lastCol) % shapePool.length;
+  let correct: { shape: string; color: string };
+  let layerCount = 1;
 
-  const correct = { shape: shapePool[correctSIdx], color: colorPool[correctCIdx] };
+  const grid: { shape: string; color: string }[][] = Array.from({ length: gridSize }, () =>
+    Array(gridSize).fill({ shape: '?', color: '#5A5A68' })
+  );
 
+  if (scheme === 'layered') {
+    // ── Original high-tier multi-rule system ──────────────────────────────
+    layerCount = Math.min(6, 1 + Math.floor(patternTier / 3));
+    const baseS = randInt(0, shapePool.length - 1);
+    const baseC = randInt(0, colorPool.length - 1);
+
+    const useRotation       = layerCount >= 1;
+    const useColorShift     = layerCount >= 2;
+    const useMirrorL        = layerCount >= 3;
+    const useSubstitution   = layerCount >= 4;
+    const useDiagonalL      = layerCount >= 5;
+    const usePositionalShift = layerCount >= 6;
+
+    for (let row = 0; row < gridSize; row++) {
+      grid[row] = [];
+      for (let col = 0; col < gridSize; col++) {
+        if (row === lastRow && col === lastCol) {
+          grid[row][col] = { shape: '?', color: '#5A5A68' };
+          continue;
+        }
+        let sIdx = baseS;
+        let cIdx = baseC;
+        if (useRotation) sIdx = (baseS + row + col) % shapePool.length;
+        if (useColorShift) cIdx = (baseC + row) % colorPool.length;
+        if (useMirrorL && col >= Math.floor(gridSize / 2)) sIdx = (sIdx + gridSize - col) % shapePool.length;
+        if (useSubstitution && row % 2 === 1) sIdx = (sIdx + 1) % shapePool.length;
+        if (useDiagonalL && row === col) cIdx = (cIdx + 2) % colorPool.length;
+        if (usePositionalShift) cIdx = (baseC + row + col) % colorPool.length;
+        if (stagnationMode === 'variant') sIdx = (sIdx + row * col) % shapePool.length;
+        grid[row][col] = { shape: shapePool[sIdx], color: colorPool[cIdx] };
+      }
+    }
+
+    let cSIdx = baseS;
+    let cCIdx = baseC;
+    if (useRotation) cSIdx = (baseS + lastRow + lastCol) % shapePool.length;
+    if (useColorShift) cCIdx = (baseC + lastRow) % colorPool.length;
+    if (useMirrorL && lastCol >= Math.floor(gridSize / 2)) cSIdx = (cSIdx + gridSize - lastCol) % shapePool.length;
+    if (useSubstitution && lastRow % 2 === 1) cSIdx = (cSIdx + 1) % shapePool.length;
+    if (useDiagonalL && lastRow === lastCol) cCIdx = (cCIdx + 2) % colorPool.length;
+    if (usePositionalShift) cCIdx = (baseC + lastRow + lastCol) % colorPool.length;
+    if (stagnationMode === 'variant') cSIdx = (cSIdx + lastRow * lastCol) % shapePool.length;
+    correct = { shape: shapePool[cSIdx], color: colorPool[cCIdx] };
+  } else {
+    // ── Named scheme ──────────────────────────────────────────────────────
+    for (let row = 0; row < gridSize; row++) {
+      grid[row] = [];
+      for (let col = 0; col < gridSize; col++) {
+        grid[row][col] = (row === lastRow && col === lastCol)
+          ? { shape: '?', color: '#5A5A68' }
+          : cellOf(row, col);
+      }
+    }
+    correct = cellOf(lastRow, lastCol);
+  }
+
+  // ── Build PLAUSIBLE distractors ───────────────────────────────────────────
+  // Always include:
+  //   d1 — correct shape, wrong color  (tests if user tracked color)
+  //   d2 — wrong shape, correct color  (tests if user tracked shape)
+  //   d3 — wrong shape AND wrong color
   const options: { shape: string; color: string }[] = [correct];
+
+  const altColor = colorPool.find(c => c !== correct.color)
+    ?? SHAPE_COLORS.find(c => c !== correct.color)!;
+  const altShape = shapePool.find(s => s !== correct.shape)
+    ?? SHAPES.find(s => s !== correct.shape)!;
+
+  const d1 = { shape: correct.shape, color: altColor };
+  const d2 = { shape: altShape, color: correct.color };
+  if (!options.find(o => o.shape === d1.shape && o.color === d1.color)) options.push(d1);
+  if (!options.find(o => o.shape === d2.shape && o.color === d2.color)) options.push(d2);
+
   let attempts = 0;
-  while (options.length < 4 && attempts < 50) {
+  while (options.length < 4 && attempts < 60) {
     attempts++;
     const s = shapePool[randInt(0, shapePool.length - 1)];
     const c = colorPool[randInt(0, colorPool.length - 1)];
-    if (!options.find(o => o.shape === s && o.color === c)) {
-      options.push({ shape: s, color: c });
-    }
+    if (!options.find(o => o.shape === s && o.color === c)) options.push({ shape: s, color: c });
   }
   while (options.length < 4) {
-    options.push({ shape: SHAPES[options.length], color: SHAPE_COLORS[options.length] });
+    options.push({ shape: SHAPES[options.length % SHAPES.length], color: SHAPE_COLORS[options.length % SHAPE_COLORS.length] });
   }
 
-  const shuffled = shuffle(options);
+  const shuffled = shuffle(options.slice(0, 4));
   const correctIndex = shuffled.findIndex(o => o.shape === correct.shape && o.color === correct.color);
 
-  return { type: 'pattern', grid, options: shuffled, correctIndex, transformationCount: layerCount };
+  return { type: 'pattern', grid, options: shuffled, correctIndex, transformationCount: layerCount, ruleHint, schemeName };
 }
 
 export interface MemoryQuestion {
@@ -116,18 +260,26 @@ export interface MemoryQuestion {
 }
 
 export function generateMemoryQuestion(memorySpan: number, memoryTier: number, stagnationMode: string | null): MemoryQuestion {
-  const count = Math.min(10, memorySpan + (stagnationMode === 'variant' ? 1 : 0));
+  const baseSpan = memorySpan + (stagnationMode === 'variant' ? 1 : 0);
+  const tierBonus = Math.floor(memoryTier / 5);
+  const count = Math.min(10, baseSpan + tierBonus);
   const selectedSymbols = pick(SYMBOLS, count);
   const selectedColors = selectedSymbols.map(() => SHAPE_COLORS[randInt(0, SHAPE_COLORS.length - 1)]);
   const sequence = selectedSymbols.map((s, i) => ({ symbol: s, color: selectedColors[i] }));
 
+  const reverseDescs = ['Select the REVERSE order', 'Choose the sequence in backwards order', 'Reorder from last to first'];
+  const sortDescs = ['Select the SORTED order (A-Z)', 'Arrange alphabetically and select', 'Choose the A-to-Z sequence'];
+  const filterDescs = ['Select only the ODD-positioned items (1st, 3rd, 5th, etc.)', 'Keep positions 1, 3, 5... and drop the rest', 'Pick every other item starting at position 1'];
+  const swapDescs = ['Swap the first and last, then select', 'Exchange first and last items, then pick the result', 'Switch the first and last positions'];
+  const removeDescs = ['Remove the middle item, then reverse', 'Drop the center element, then reverse the rest', 'Eliminate the middle, then flip the order'];
+
   const availableTasks: { task: MemoryQuestion['task']; desc: string }[] = [
-    { task: 'reverse', desc: 'Select the REVERSE order' },
+    { task: 'reverse', desc: reverseDescs[randInt(0, reverseDescs.length - 1)] },
   ];
-  if (memoryTier >= 3) availableTasks.push({ task: 'sort', desc: 'Select the SORTED order (A-Z)' });
-  if (memoryTier >= 5) availableTasks.push({ task: 'filter', desc: 'Select only the ODD-positioned items' });
-  if (memoryTier >= 7) availableTasks.push({ task: 'swap', desc: 'Swap the first and last, then select' });
-  if (memoryTier >= 10) availableTasks.push({ task: 'removeAndReverse', desc: 'Remove the middle item, then reverse' });
+  if (memoryTier >= 3) availableTasks.push({ task: 'sort', desc: sortDescs[randInt(0, sortDescs.length - 1)] });
+  if (memoryTier >= 5) availableTasks.push({ task: 'filter', desc: filterDescs[randInt(0, filterDescs.length - 1)] });
+  if (memoryTier >= 7) availableTasks.push({ task: 'swap', desc: swapDescs[randInt(0, swapDescs.length - 1)] });
+  if (memoryTier >= 10) availableTasks.push({ task: 'removeAndReverse', desc: removeDescs[randInt(0, removeDescs.length - 1)] });
 
   if (stagnationMode === 'formatChange' && availableTasks.length > 1) {
     availableTasks.reverse();
@@ -185,10 +337,12 @@ export function generateMemoryQuestion(memorySpan: number, memoryTier: number, s
   const shuffled = shuffle(options);
   const correctIndex = shuffled.findIndex(o => JSON.stringify(o) === JSON.stringify(correctAnswer));
 
-  const baseDisplay = 2000;
-  const tierReduction = memoryTier * 80;
-  const stagnationBonus = stagnationMode === 'timerCompress' ? -200 : 0;
-  const displayTimeMs = Math.max(600, baseDisplay - tierReduction + stagnationBonus);
+  // Level 1–10: at least 7s so new users can view the sequence. Higher tiers scale down.
+  const stagnationBonus = stagnationMode === 'timerCompress' ? -500 : 0;
+  const displayTimeMs =
+    memoryTier <= 10
+      ? Math.max(6500, 7000 + stagnationBonus)
+      : Math.max(600, 7000 - (memoryTier - 10) * 250 + stagnationBonus);
 
   return {
     type: 'memory',
@@ -217,27 +371,54 @@ interface Rule {
   apply: (n: number) => number;
 }
 
+const RULE_VARIANTS: { desc: string; apply: (n: number) => number }[][] = [
+  [{ desc: 'Add 3', apply: n => n + 3 }, { desc: 'Plus 3', apply: n => n + 3 }],
+  [{ desc: 'Multiply by 2', apply: n => n * 2 }, { desc: 'Double it', apply: n => n * 2 }],
+  [{ desc: 'Subtract 4', apply: n => n - 4 }, { desc: 'Minus 4', apply: n => n - 4 }],
+  [{ desc: 'Add 7', apply: n => n + 7 }, { desc: 'Plus 7', apply: n => n + 7 }],
+  [{ desc: 'Multiply by 3', apply: n => n * 3 }, { desc: 'Triple it', apply: n => n * 3 }],
+  [{ desc: 'Double and add 1', apply: n => n * 2 + 1 }, { desc: '2× then +1', apply: n => n * 2 + 1 }],
+  [{ desc: 'Square root (round down)', apply: n => Math.floor(Math.sqrt(Math.abs(n))) }, { desc: '√n, floor', apply: n => Math.floor(Math.sqrt(Math.abs(n))) }],
+  [{ desc: 'Add 11 then halve', apply: n => Math.floor((n + 11) / 2) }, { desc: '(n+11)/2, floor', apply: n => Math.floor((n + 11) / 2) }],
+  [{ desc: 'Triple and subtract 5', apply: n => n * 3 - 5 }, { desc: '3× minus 5', apply: n => n * 3 - 5 }],
+  [{ desc: 'If even halve, if odd triple', apply: n => n % 2 === 0 ? n / 2 : n * 3 }, { desc: 'Even→÷2, odd→×3', apply: n => n % 2 === 0 ? n / 2 : n * 3 }],
+  [{ desc: 'Multiply by 2 then add digits', apply: n => { const d = n * 2; return d + Math.floor(d / 10) + (d % 10); } }, { desc: '2× then sum of digits', apply: n => { const d = n * 2; return d + Math.floor(d / 10) + (d % 10); } }],
+  [{ desc: 'Add digits of n', apply: n => Math.abs(n).toString().split('').reduce((s, c) => s + parseInt(c, 10), 0) }, { desc: 'Sum of digits', apply: n => Math.abs(n).toString().split('').reduce((s, c) => s + parseInt(c, 10), 0) }],
+  [{ desc: 'If n>5 add 2, else subtract 2', apply: n => n > 5 ? n + 2 : n - 2 }, { desc: '>5 then +2, else −2', apply: n => n > 5 ? n + 2 : n - 2 }],
+  [{ desc: 'n² mod 20', apply: n => ((n * n) % 20 + 20) % 20 }, { desc: 'Square, mod 20', apply: n => ((n * n) % 20 + 20) % 20 }],
+];
+
+function pickRuleVariant(idx: number): Rule {
+  const v = RULE_VARIANTS[idx][randInt(0, RULE_VARIANTS[idx].length - 1)];
+  return { desc: v.desc, apply: v.apply };
+}
+
 function getRulesForTier(tier: number): Rule[] {
   const rules: Rule[] = [
-    { desc: 'Add 3', apply: n => n + 3 },
-    { desc: 'Multiply by 2', apply: n => n * 2 },
-    { desc: 'Subtract 4', apply: n => n - 4 },
-    { desc: 'Add 7', apply: n => n + 7 },
+    pickRuleVariant(0),
+    pickRuleVariant(1),
+    pickRuleVariant(2),
+    pickRuleVariant(3),
   ];
   if (tier >= 3) {
-    rules.push({ desc: 'Multiply by 3', apply: n => n * 3 });
-    rules.push({ desc: 'Double and add 1', apply: n => n * 2 + 1 });
+    rules.push(pickRuleVariant(4));
+    rules.push(pickRuleVariant(5));
   }
   if (tier >= 6) {
-    rules.push({ desc: 'Square root (round down)', apply: n => Math.floor(Math.sqrt(Math.abs(n))) });
-    rules.push({ desc: 'Add 11 then halve', apply: n => Math.floor((n + 11) / 2) });
+    rules.push(pickRuleVariant(6));
+    rules.push(pickRuleVariant(7));
   }
   if (tier >= 9) {
-    rules.push({ desc: 'Triple and subtract 5', apply: n => n * 3 - 5 });
-    rules.push({ desc: 'If even halve, if odd triple', apply: n => n % 2 === 0 ? n / 2 : n * 3 });
+    rules.push(pickRuleVariant(8));
+    rules.push(pickRuleVariant(9));
   }
   if (tier >= 12) {
-    rules.push({ desc: 'Multiply by 2 then add digits', apply: n => { const d = n * 2; return d + Math.floor(d / 10) + (d % 10); } });
+    rules.push(pickRuleVariant(10));
+    rules.push(pickRuleVariant(11));
+  }
+  if (tier >= 15) {
+    rules.push(pickRuleVariant(12));
+    rules.push(pickRuleVariant(13));
   }
   return rules;
 }
@@ -288,7 +469,7 @@ export function generateRuleMutationQuestion(
     type: 'ruleMutation',
     startValue,
     currentRule: ruleIdx.toString(),
-    ruleDescription: (ruleChanged || forceChange) ? 'New Rule!' : rule.desc,
+    ruleDescription: (ruleChanged || forceChange) ? `New Rule! ${rule.desc}` : rule.desc,
     options: shuffled,
     correctIndex,
     ruleChanged: ruleChanged || forceChange,
@@ -316,11 +497,60 @@ export interface DualTaskQuestion {
 
 export function generateDualTaskQuestion(flexTier: number, stagnationMode: string | null): DualTaskQuestion {
   const seqLength = Math.min(8, 4 + Math.floor(flexTier / 3));
-  const baseShapes = pick(SHAPES, Math.min(4, 2 + Math.floor(flexTier / 4)));
+  const baseShapes = pick(SHAPES, Math.min(6, 2 + Math.floor(flexTier / 4)));
 
   const visualSeq: string[] = [];
-  for (let i = 0; i < seqLength; i++) {
-    visualSeq.push(baseShapes[i % baseShapes.length]);
+  // How many learnable pattern types to offer grows with tier
+  const maxPattern = flexTier >= 8 ? 4 : flexTier >= 5 ? 3 : flexTier >= 3 ? 2 : 1;
+  const patternType = randInt(0, maxPattern);
+
+  if (patternType === 0) {
+    // Simple n-cycle: A B C A B C …
+    for (let i = 0; i < seqLength; i++) {
+      visualSeq.push(baseShapes[i % baseShapes.length]);
+    }
+  } else if (patternType === 1) {
+    // Alternating pairs: A A B B A A B B …  (uses first 2 shapes)
+    const a = baseShapes[0];
+    const b = baseShapes[Math.min(1, baseShapes.length - 1)];
+    for (let i = 0; i < seqLength; i++) {
+      visualSeq.push(Math.floor(i / 2) % 2 === 0 ? a : b);
+    }
+  } else if (patternType === 2) {
+    // Interleaved anchor: shape A at every even index, other shapes cycle at odd indices
+    // e.g. A B A C A D A B … — rule is clearly "A comes back every other step"
+    const anchor = baseShapes[0];
+    const rest = baseShapes.slice(1);
+    let restIdx = 0;
+    for (let i = 0; i < seqLength; i++) {
+      if (i % 2 === 0) {
+        visualSeq.push(anchor);
+      } else {
+        visualSeq.push(rest[restIdx % Math.max(1, rest.length)]);
+        restIdx++;
+      }
+    }
+  } else if (patternType === 3) {
+    // Growing blocks: 1× shape A, 2× shape B, 3× shape C, then wrap
+    // e.g. A B B C C C A B B …
+    let blockShape = 0;
+    let blockSize = 1;
+    let filled = 0;
+    for (let i = 0; i < seqLength; i++) {
+      visualSeq.push(baseShapes[blockShape % baseShapes.length]);
+      filled++;
+      if (filled >= blockSize) {
+        blockShape++;
+        blockSize++;
+        filled = 0;
+        if (blockSize > 3) { blockShape = 0; blockSize = 1; }
+      }
+    }
+  } else {
+    // Reverse n-cycle: C B A C B A … (descending through pool)
+    for (let i = 0; i < seqLength; i++) {
+      visualSeq.push(baseShapes[(baseShapes.length - 1 - (i % baseShapes.length))]);
+    }
   }
   const missingIndex = seqLength - 1;
   const correctShape = visualSeq[missingIndex];
@@ -331,8 +561,8 @@ export function generateDualTaskQuestion(flexTier: number, stagnationMode: strin
   while (visualOptions.length < 4) visualOptions.push(SHAPES[visualOptions.length]);
   const visualCorrectIndex = visualOptions.indexOf(correctShape);
 
-  const targetColor = SHAPE_COLORS[randInt(0, 2)];
-  const flashCount = Math.min(12, 5 + Math.floor(flexTier / 2));
+  const targetColor = SHAPE_COLORS[randInt(0, SHAPE_COLORS.length - 1)];
+  const flashCount = Math.min(14, 5 + Math.floor(flexTier / 2) + (flexTier >= 10 ? 2 : 0));
   const flashes: string[] = [];
   let targetCount = randInt(1, Math.min(5, Math.floor(flashCount / 2)));
   const targetCountTarget = targetCount;
@@ -348,15 +578,16 @@ export function generateDualTaskQuestion(flexTier: number, stagnationMode: strin
   }
   const correctCount = flashes.filter(f => f === targetColor).length;
 
+  // Spread options symmetrically: -2, -1, correct, +1
   const countOptionsSet = new Set([correctCount]);
   countOptionsSet.add(Math.max(0, correctCount - 1));
   countOptionsSet.add(correctCount + 1);
-  countOptionsSet.add(Math.max(0, correctCount + 2));
-  if (countOptionsSet.size < 4) countOptionsSet.add(correctCount + 3);
+  countOptionsSet.add(Math.max(0, correctCount - 2));
+  if (countOptionsSet.size < 4) countOptionsSet.add(correctCount + 2);
   const countOptions = shuffle([...countOptionsSet]).slice(0, 4);
   const countCorrectIndex = countOptions.indexOf(correctCount);
 
-  const distractorEnabled = flexTier >= 8 || stagnationMode === 'variant';
+  const distractorEnabled = flexTier >= 6 || stagnationMode === 'variant';
 
   return {
     type: 'dualTask',
@@ -399,6 +630,14 @@ const LOGIC_POOLS: Record<string, { q: string; options: string[]; correct: numbe
     { q: 'Some birds swim. All penguins are birds. Do all penguins swim?', options: ['Yes', 'No', 'Cannot determine'], correct: 2 },
     { q: 'If it is Monday, then it is a weekday. It is a weekday. Is it Monday?', options: ['Yes', 'No', 'Cannot determine'], correct: 2 },
     { q: 'All tigers are striped. Leo is striped. Is Leo a tiger?', options: ['Yes', 'No', 'Cannot determine'], correct: 2 },
+    { q: 'All books have pages. This has pages. Is it a book?', options: ['Yes', 'No', 'Cannot determine'], correct: 2 },
+    { q: 'If A = B and B = C, is A = C?', options: ['Yes', 'No', 'Cannot determine'], correct: 0 },
+    { q: 'All mammals breathe air. A whale is a mammal. Does it breathe air?', options: ['Yes', 'No', 'Cannot determine'], correct: 0 },
+    { q: 'Some fruits are red. All apples are fruits. Are all apples red?', options: ['Yes', 'No', 'Cannot determine'], correct: 2 },
+    { q: 'If the door is open, air flows. Air is flowing. Is the door open?', options: ['Yes', 'No', 'Cannot determine'], correct: 2 },
+    { q: 'All vehicles have wheels. A boat has no wheels. Is a boat a vehicle?', options: ['Yes', 'No', 'Cannot determine'], correct: 1 },
+    { q: 'If Z = 10 and W = Z − 4, what is W?', options: ['10', '6', '14'], correct: 1 },
+    { q: 'No reptiles are warm-blooded. A snake is a reptile. Is it warm-blooded?', options: ['Yes', 'No', 'Cannot determine'], correct: 1 },
   ],
   medium: [
     { q: 'If some A are B and no B are C, can any A be C?', options: ['Yes', 'No', 'Cannot determine'], correct: 2 },
@@ -413,6 +652,12 @@ const LOGIC_POOLS: Record<string, { q: string; options: string[]; correct: numbe
     { q: 'No mammals lay eggs (exception: monotremes). A platypus is a monotreme. Does it lay eggs?', options: ['Yes', 'No', 'Cannot determine'], correct: 0 },
     { q: 'If the lamp is on, the room is bright. The room is dark. Is the lamp on?', options: ['Yes', 'No', 'Cannot determine'], correct: 1 },
     { q: 'All efficient workers finish early. Sam finished early. Is Sam efficient?', options: ['Yes', 'No', 'Cannot determine'], correct: 2 },
+    { q: 'Some musicians play piano. All pianists are musicians. Do all musicians play piano?', options: ['Yes', 'No', 'Cannot determine'], correct: 2 },
+    { q: 'If M > N and N > O and O > P, which is smallest?', options: ['M', 'N', 'P'], correct: 2 },
+    { q: 'All metals conduct electricity. Wood is not a metal. Does wood conduct?', options: ['Yes', 'No', 'Cannot determine'], correct: 2 },
+    { q: 'If (A and B) then C. C is true. What do we know?', options: ['A and B are true', 'At least one is true', 'Cannot determine'], correct: 2 },
+    { q: 'Some athletes run. All runners are fit. Are all athletes fit?', options: ['Yes', 'No', 'Cannot determine'], correct: 2 },
+    { q: 'If X implies Y, and X is false, what about Y?', options: ['Y is true', 'Y is false', 'Cannot determine'], correct: 2 },
   ],
   hard: [
     { q: 'If all A are B, and no C are B, but some D are C, can any D be A?', options: ['Yes', 'No', 'Cannot determine'], correct: 1 },
@@ -427,6 +672,82 @@ const LOGIC_POOLS: Record<string, { q: string; options: string[]; correct: numbe
     { q: 'If no A are B, and all C are A, can any C be B?', options: ['Yes', 'No', 'Cannot determine'], correct: 1 },
     { q: 'A > B, C > D, B > C. Rank greatest to least.', options: ['A, B, C, D', 'A, C, B, D', 'Cannot determine'], correct: 0 },
     { q: 'If (P or Q) and (not P or R), and Q is false, what must be true?', options: ['P and R', 'R only', 'Cannot determine'], correct: 0 },
+    { q: 'All P are Q. No Q are R. Some S are R. Can any S be P?', options: ['Yes', 'No', 'Cannot determine'], correct: 1 },
+    { q: 'If A→B, B→C, C→D, and A is true, what about D?', options: ['D is true', 'D is false', 'Cannot determine'], correct: 0 },
+    { q: 'Exactly two of X, Y, Z are true. X implies Y. Y is false. Which are true?', options: ['X and Z', 'Y and Z', 'X and Y'], correct: 0 },
+    { q: 'All G are H. Some H are J. No J are K. Can any G be K?', options: ['Yes', 'No', 'Cannot determine'], correct: 2 },
+  ],
+};
+
+const ANALOGY_POOLS: Record<string, { q: string; options: string[]; correct: number }[]> = {
+  easy: [
+    { q: 'Hand → Glove  |  Foot → ___', options: ['Shoe', 'Leg', 'Floor', 'Sock'], correct: 0 },
+    { q: 'Bird → Fly  |  Fish → ___', options: ['Swim', 'Jump', 'Run', 'Breathe'], correct: 0 },
+    { q: 'Doctor → Hospital  |  Teacher → ___', options: ['School', 'Student', 'Book', 'Desk'], correct: 0 },
+    { q: 'Hot → Cold  |  Day → ___', options: ['Night', 'Sun', 'Warm', 'Sky'], correct: 0 },
+    { q: 'Pen → Write  |  Knife → ___', options: ['Cut', 'Cook', 'Draw', 'Point'], correct: 0 },
+    { q: 'Author → Book  |  Composer → ___', options: ['Symphony', 'Piano', 'Orchestra', 'Sound'], correct: 0 },
+    { q: 'Tree → Forest  |  Star → ___', options: ['Galaxy', 'Sky', 'Planet', 'Space'], correct: 0 },
+    { q: 'Eye → See  |  Ear → ___', options: ['Hear', 'Touch', 'Smell', 'Taste'], correct: 0 },
+    { q: 'Clock → Time  |  Ruler → ___', options: ['Length', 'Weight', 'Speed', 'Area'], correct: 0 },
+    { q: 'Cup → Drink  |  Plate → ___', options: ['Eat', 'Cook', 'Serve', 'Pour'], correct: 0 },
+    { q: 'Child → Adult  |  Seed → ___', options: ['Tree', 'Flower', 'Leaf', 'Root'], correct: 0 },
+    { q: 'Hammer → Nail  |  Key → ___', options: ['Lock', 'Door', 'Open', 'Metal'], correct: 0 },
+  ],
+  medium: [
+    { q: 'Affluent → Poor  |  Courageous → ___', options: ['Cowardly', 'Brave', 'Bold', 'Strong'], correct: 0 },
+    { q: 'Surgeon → Scalpel  |  Painter → ___', options: ['Brush', 'Canvas', 'Palette', 'Art'], correct: 0 },
+    { q: 'Prologue → Epilogue  |  Introduction → ___', options: ['Conclusion', 'Beginning', 'Chapter', 'Index'], correct: 0 },
+    { q: 'Harmony → Discord  |  Order → ___', options: ['Chaos', 'Pattern', 'Rule', 'System'], correct: 0 },
+    { q: 'Barometer → Pressure  |  Thermometer → ___', options: ['Temperature', 'Heat', 'Weather', 'Liquid'], correct: 0 },
+    { q: 'Elegy → Mourning  |  Hymn → ___', options: ['Worship', 'Sadness', 'Joy', 'Music'], correct: 0 },
+    { q: 'Myopic → Near  |  Hyperopic → ___', options: ['Far', 'Blind', 'Focused', 'Clear'], correct: 0 },
+    { q: 'Chronicle → Events  |  Biography → ___', options: ['Life', 'History', 'Fiction', 'Place'], correct: 0 },
+    { q: 'General → Army  |  Captain → ___', options: ['Ship', 'Team', 'Crew', 'Plane'], correct: 0 },
+    { q: 'Mitigate → Worsen  |  Clarity → ___', options: ['Confusion', 'Vision', 'Clearness', 'Light'], correct: 0 },
+  ],
+  hard: [
+    { q: 'Sycophant → Flatter  |  Iconoclast → ___', options: ['Challenge', 'Support', 'Create', 'Praise'], correct: 0 },
+    { q: 'Laconic → Verbose  |  Lucid → ___', options: ['Opaque', 'Clear', 'Brief', 'Bright'], correct: 0 },
+    { q: 'Catalyst → Reaction  |  Incentive → ___', options: ['Action', 'Reward', 'Cause', 'Result'], correct: 0 },
+    { q: 'Parochial → Cosmopolitan  |  Temporal → ___', options: ['Eternal', 'Worldly', 'Brief', 'Local'], correct: 0 },
+    { q: 'Ephemeral → Permanent  |  Tacit → ___', options: ['Explicit', 'Silent', 'Quiet', 'Hidden'], correct: 0 },
+    { q: 'Obfuscate → Clarify  |  Exacerbate → ___', options: ['Alleviate', 'Worsen', 'Cause', 'Ignore'], correct: 0 },
+  ],
+};
+
+const NUMBER_SERIES_POOLS: Record<string, { q: string; options: string[]; correct: number; rule: string }[]> = {
+  easy: [
+    { q: '2, 4, 6, 8, ___', options: ['10', '9', '12', '11'], correct: 0, rule: '+2' },
+    { q: '5, 10, 15, 20, ___', options: ['25', '22', '24', '30'], correct: 0, rule: '+5' },
+    { q: '100, 90, 80, 70, ___', options: ['60', '50', '65', '55'], correct: 0, rule: '−10' },
+    { q: '1, 2, 4, 8, ___', options: ['16', '12', '14', '10'], correct: 0, rule: '×2' },
+    { q: '1, 4, 9, 16, ___', options: ['25', '20', '24', '36'], correct: 0, rule: 'n²' },
+    { q: '3, 6, 12, 24, ___', options: ['48', '36', '42', '44'], correct: 0, rule: '×2' },
+    { q: '10, 8, 6, 4, ___', options: ['2', '0', '3', '1'], correct: 0, rule: '−2' },
+    { q: '1, 3, 5, 7, ___', options: ['9', '8', '10', '11'], correct: 0, rule: '+2 (odd)' },
+    { q: '2, 6, 18, 54, ___', options: ['162', '108', '144', '180'], correct: 0, rule: '×3' },
+    { q: '50, 45, 40, 35, ___', options: ['30', '25', '32', '28'], correct: 0, rule: '−5' },
+  ],
+  medium: [
+    { q: '1, 1, 2, 3, 5, 8, ___', options: ['13', '11', '10', '12'], correct: 0, rule: 'Fibonacci' },
+    { q: '2, 5, 10, 17, 26, ___', options: ['37', '33', '35', '39'], correct: 0, rule: 'n²+1' },
+    { q: '1, 2, 4, 7, 11, 16, ___', options: ['22', '20', '18', '24'], correct: 0, rule: '+1,+2,+3…' },
+    { q: '4, 7, 11, 18, 29, ___', options: ['47', '43', '40', '45'], correct: 0, rule: 'a+b=next' },
+    { q: '1, 1, 2, 6, 24, ___', options: ['120', '48', '100', '96'], correct: 0, rule: 'n!' },
+    { q: '3, 7, 15, 31, 63, ___', options: ['127', '112', '120', '124'], correct: 0, rule: '2n+1' },
+    { q: '81, 27, 9, 3, ___', options: ['1', '2', '0', '3'], correct: 0, rule: '÷3' },
+    { q: '1, 3, 7, 13, 21, ___', options: ['31', '29', '33', '27'], correct: 0, rule: '+2,+4,+6…' },
+    { q: '2, 3, 5, 7, 11, 13, ___', options: ['17', '15', '19', '14'], correct: 0, rule: 'Primes' },
+    { q: '0, 1, 3, 6, 10, ___', options: ['15', '13', '14', '16'], correct: 0, rule: 'Triangular' },
+  ],
+  hard: [
+    { q: '1, 8, 27, 64, 125, ___', options: ['216', '196', '180', '210'], correct: 0, rule: 'n³' },
+    { q: '2, 6, 12, 20, 30, 42, ___', options: ['56', '50', '54', '48'], correct: 0, rule: 'n(n+1)' },
+    { q: '1, 2, 6, 24, 120, ___', options: ['720', '600', '480', '360'], correct: 0, rule: 'n!' },
+    { q: '1, 5, 14, 30, 55, ___', options: ['91', '84', '77', '70'], correct: 0, rule: 'Pyramid' },
+    { q: '2, 3, 5, 11, 17, 41, ___', options: ['83', '71', '59', '67'], correct: 0, rule: 'Twin primes' },
+    { q: '1, 3, 6, 10, 15, 21, 28, ___', options: ['36', '35', '30', '33'], correct: 0, rule: 'Triangular n' },
   ],
 };
 
@@ -435,19 +756,39 @@ export function generateRapidLogicQuestion(
   timerMultiplier: number,
   stagnationMode: string | null,
 ): RapidLogicQuestion {
-  let pool: { q: string; options: string[]; correct: number }[];
-  if (dualTier <= 4) pool = LOGIC_POOLS.easy;
-  else if (dualTier <= 9) pool = LOGIC_POOLS.medium;
-  else pool = LOGIC_POOLS.hard;
-
-  if (stagnationMode === 'variant' && dualTier <= 9) {
-    pool = [...pool, ...LOGIC_POOLS.hard.slice(0, 3)];
-  }
-
-  const q = pool[randInt(0, pool.length - 1)];
   const baseTimer = dualTier <= 4 ? 10 : dualTier <= 9 ? 8 : 6;
   const timerSeconds = Math.max(4, Math.round(baseTimer * timerMultiplier));
 
+  // Mix question types based on tier: higher tiers get more variety
+  const rand = Math.random();
+  const analogyChance = dualTier >= 3 ? 0.3 : 0;
+  const seriesChance = dualTier >= 3 ? 0.3 : 0;
+
+  if (rand < analogyChance) {
+    // Verbal Analogy
+    const pool = dualTier <= 5 ? ANALOGY_POOLS.easy : dualTier <= 12 ? ANALOGY_POOLS.medium : ANALOGY_POOLS.hard;
+    const q = pool[randInt(0, pool.length - 1)];
+    return { type: 'rapidLogic', question: q.q, options: q.options, correctIndex: q.correct, timerSeconds };
+  }
+
+  if (rand < analogyChance + seriesChance) {
+    // Number Series
+    const pool = dualTier <= 5 ? NUMBER_SERIES_POOLS.easy : dualTier <= 12 ? NUMBER_SERIES_POOLS.medium : NUMBER_SERIES_POOLS.hard;
+    const q = pool[randInt(0, pool.length - 1)];
+    return { type: 'rapidLogic', question: q.q, options: q.options, correctIndex: q.correct, timerSeconds };
+  }
+
+  // Classic syllogism / logic
+  let pool: { q: string; options: string[]; correct: number }[];
+  if (dualTier <= 4) pool = LOGIC_POOLS.easy;
+  else if (dualTier <= 9) pool = [...LOGIC_POOLS.easy.slice(-4), ...LOGIC_POOLS.medium];
+  else pool = [...LOGIC_POOLS.medium.slice(-4), ...LOGIC_POOLS.hard];
+
+  if (stagnationMode === 'variant' && dualTier <= 9) {
+    pool = [...pool, ...LOGIC_POOLS.hard.slice(0, 5)];
+  }
+
+  const q = pool[randInt(0, pool.length - 1)];
   return {
     type: 'rapidLogic',
     question: q.q,
@@ -455,6 +796,196 @@ export function generateRapidLogicQuestion(
     correctIndex: q.correct,
     timerSeconds,
   };
+}
+
+// ─── Raven's Matrix (explicit rule-based, IQ-style) ───────────────────────────
+
+export type RavenRule = 'rotation' | 'colorShift' | 'mirror' | 'substitution' | 'diagonal' | 'positionalShift';
+
+export interface RavenMatrixQuestion {
+  type: 'ravenMatrix';
+  grid: { shape: string; color: string }[][];
+  options: { shape: string; color: string }[];
+  correctIndex: number;
+  ruleCount: number;
+  rules: RavenRule[];
+}
+
+export function generateRavenMatrix(patternTier: number): RavenMatrixQuestion {
+  // Always 3x3 grid (Raven's standard)
+  const GRID_SIZE = 3;
+  const ruleCount = Math.min(5, 1 + Math.floor(patternTier / 8));
+  const rulesPool: RavenRule[] = ['rotation', 'colorShift', 'mirror', 'substitution', 'diagonal', 'positionalShift'];
+  const activeRules: RavenRule[] = rulesPool.slice(0, ruleCount);
+
+  const shapePool = pick(SHAPES, Math.min(SHAPES.length, 3 + Math.floor(patternTier / 12)));
+  const colorPool = pick(SHAPE_COLORS, Math.min(SHAPE_COLORS.length, 3 + Math.floor(patternTier / 15)));
+  const baseS = randInt(0, shapePool.length - 1);
+  const baseC = randInt(0, colorPool.length - 1);
+
+  const grid: { shape: string; color: string }[][] = [];
+  for (let row = 0; row < GRID_SIZE; row++) {
+    grid[row] = [];
+    for (let col = 0; col < GRID_SIZE; col++) {
+      if (row === GRID_SIZE - 1 && col === GRID_SIZE - 1) {
+        grid[row][col] = { shape: '?', color: '#5A5A68' };
+        continue;
+      }
+      let sIdx = baseS;
+      let cIdx = baseC;
+      if (activeRules.includes('rotation')) sIdx = (baseS + row + col) % shapePool.length;
+      if (activeRules.includes('colorShift')) cIdx = (baseC + row) % colorPool.length;
+      if (activeRules.includes('mirror') && col >= 1) sIdx = (sIdx + GRID_SIZE - col) % shapePool.length;
+      if (activeRules.includes('substitution') && row % 2 === 1) sIdx = (sIdx + 1) % shapePool.length;
+      if (activeRules.includes('diagonal') && row === col) cIdx = (cIdx + 2) % colorPool.length;
+      if (activeRules.includes('positionalShift')) cIdx = (baseC + row + col) % colorPool.length;
+      grid[row][col] = { shape: shapePool[sIdx], color: colorPool[cIdx] };
+    }
+  }
+
+  const lr = GRID_SIZE - 1;
+  const lc = GRID_SIZE - 1;
+  let cSIdx = baseS;
+  let cCIdx = baseC;
+  if (activeRules.includes('rotation')) cSIdx = (baseS + lr + lc) % shapePool.length;
+  if (activeRules.includes('colorShift')) cCIdx = (baseC + lr) % colorPool.length;
+  if (activeRules.includes('mirror') && lc >= 1) cSIdx = (cSIdx + GRID_SIZE - lc) % shapePool.length;
+  if (activeRules.includes('substitution') && lr % 2 === 1) cSIdx = (cSIdx + 1) % shapePool.length;
+  if (activeRules.includes('diagonal') && lr === lc) cCIdx = (cCIdx + 2) % colorPool.length;
+  if (activeRules.includes('positionalShift')) cCIdx = (baseC + lr + lc) % colorPool.length;
+
+  const correct = { shape: shapePool[cSIdx], color: colorPool[cCIdx] };
+  const options: { shape: string; color: string }[] = [correct];
+  let attempts = 0;
+  while (options.length < 6 && attempts < 100) {
+    attempts++;
+    const s = shapePool[randInt(0, shapePool.length - 1)];
+    const c = colorPool[randInt(0, colorPool.length - 1)];
+    if (!options.find(o => o.shape === s && o.color === c)) options.push({ shape: s, color: c });
+  }
+  while (options.length < 6) options.push({ shape: SHAPES[options.length % SHAPES.length], color: SHAPE_COLORS[options.length % SHAPE_COLORS.length] });
+
+  const shuffled = shuffle(options);
+  const correctIndex = shuffled.findIndex(o => o.shape === correct.shape && o.color === correct.color);
+
+  return { type: 'ravenMatrix', grid, options: shuffled, correctIndex, ruleCount, rules: activeRules };
+}
+
+// ─── Mental Rotation ──────────────────────────────────────────────────────────
+
+export interface MentalRotationQuestion {
+  type: 'mentalRotation';
+  targetShape: string;
+  targetColor: string;
+  targetRotation: number;  // 0, 45, 90, 135, 180, 225, 270, 315
+  options: { shape: string; color: string; rotation: number; isSame: boolean }[];
+  correctIndex: number;
+  difficulty: number;
+}
+
+export function generateMentalRotationQuestion(speedTier: number): MentalRotationQuestion {
+  const difficulty = Math.min(4, Math.floor(speedTier / 10));
+  const targetShape = SHAPES[randInt(0, SHAPES.length - 1)];
+  const targetColor = SHAPE_COLORS[randInt(0, SHAPE_COLORS.length - 1)];
+  const targetRotation = randInt(0, 7) * 45;
+
+  // Correct answer: same shape & color, but different rotation
+  const offsets = [90, 135, 180, 225];
+  const correctRotation = (targetRotation + offsets[randInt(0, offsets.length - 1)]) % 360;
+  const correct = { shape: targetShape, color: targetColor, rotation: correctRotation, isSame: true };
+
+  const distractors: { shape: string; color: string; rotation: number; isSame: boolean }[] = [];
+  for (let i = 0; i < 3; i++) {
+    let dShape: string;
+    if (difficulty >= 3) {
+      // Hardest: same shape, different color (mirror confusion)
+      dShape = targetShape;
+    } else if (difficulty >= 2) {
+      // Medium: shapes from same pool
+      dShape = SHAPES[randInt(0, SHAPES.length - 1)];
+    } else {
+      // Easy: clearly different shapes
+      const others = SHAPES.filter(s => s !== targetShape);
+      dShape = others[randInt(0, others.length - 1)];
+    }
+    const dColor = difficulty >= 3
+      ? SHAPE_COLORS.filter(c => c !== targetColor)[randInt(0, SHAPE_COLORS.length - 2)]
+      : targetColor;
+    distractors.push({ shape: dShape, color: dColor, rotation: randInt(0, 7) * 45, isSame: false });
+  }
+
+  const options = shuffle([correct, ...distractors]);
+  const correctIndex = options.findIndex(o => o.isSame);
+  return { type: 'mentalRotation', targetShape, targetColor, targetRotation, options, correctIndex, difficulty };
+}
+
+// ─── Dual N-Back ──────────────────────────────────────────────────────────────
+
+export interface DualNBackTrial {
+  type: 'dualNBack';
+  n: number;
+  totalTrials: number;
+  currentTrial: number;
+  visualPosition: number;  // 0-8 on a 3x3 grid
+  auditoryLetter: string;  // A-H
+  isVisualMatch: boolean;
+  isAuditoryMatch: boolean;
+}
+
+export interface DualNBackSession {
+  n: number;
+  trials: DualNBackTrial[];
+}
+
+const NBACK_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+
+export function generateDualNBackSession(memoryTier: number, nOverride?: number): DualNBackSession {
+  const baseN = Math.max(2, Math.min(6, 2 + Math.floor(memoryTier / 12)));
+  const n = nOverride ? Math.max(2, Math.min(6, nOverride)) : baseN;
+  const totalTrials = Math.min(25, 18 + Math.floor(memoryTier / 15));
+  const MATCH_PROB = 0.3;
+
+  const posHistory: number[] = [];
+  const letHistory: string[] = [];
+  const trials: DualNBackTrial[] = [];
+
+  for (let t = 0; t < totalTrials; t++) {
+    let visualPos: number;
+    let isVisualMatch = false;
+    if (t >= n && Math.random() < MATCH_PROB) {
+      visualPos = posHistory[t - n];
+      isVisualMatch = true;
+    } else {
+      do { visualPos = randInt(0, 8); }
+      while (t >= n && visualPos === posHistory[t - n]);
+    }
+
+    let letter: string;
+    let isAuditoryMatch = false;
+    if (t >= n && Math.random() < MATCH_PROB) {
+      letter = letHistory[t - n];
+      isAuditoryMatch = true;
+    } else {
+      do { letter = NBACK_LETTERS[randInt(0, NBACK_LETTERS.length - 1)]; }
+      while (t >= n && letter === letHistory[t - n]);
+    }
+
+    posHistory.push(visualPos);
+    letHistory.push(letter);
+
+    trials.push({
+      type: 'dualNBack',
+      n,
+      totalTrials,
+      currentTrial: t,
+      visualPosition: visualPos,
+      auditoryLetter: letter,
+      isVisualMatch,
+      isAuditoryMatch,
+    });
+  }
+
+  return { n, trials };
 }
 
 export interface BaselineQuestion {
