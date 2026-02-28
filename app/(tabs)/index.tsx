@@ -9,17 +9,88 @@ import Colors from '@/constants/colors';
 import { useThemeColors } from '@/hooks/useThemeColors';
 import { useUser } from '@/contexts/UserContext';
 import { analyzeWeaknesses, calculateSessionDifficulty, calculateLearningVelocity, calculateJojoIQ } from '@/lib/adaptive';
+import { MAX_LEVEL, FREE_TIER_MAX_LEVEL, FREE_TIER_SESSIONS_PER_DAY } from '@/lib/constants';
 
-// ... (imports)
+const { width } = Dimensions.get('window');
+
+const TRAIT_LABEL_MAP: Record<string, string> = {
+  Pattern: 'Pattern Recognition',
+  Memory: 'Working Memory',
+  Speed: 'Processing Speed',
+  Flex: 'Cognitive Flexibility',
+  Dual: 'Dual-Task Processing',
+};
+
+const TRAIT_KEY_MAP: Record<string, string> = {
+  Pattern: 'patternLevel',
+  Memory: 'memorySpan',
+  Speed: 'speedIndex',
+  Flex: 'flexibilityScore',
+  Dual: 'dualTaskCapacity',
+};
 
 export default function HomeScreen() {
-  // ... (hooks)
+  const insets = useSafeAreaInsets();
+  const theme = useThemeColors();
+  const { profile, canStartSession, sessionLogs } = useUser();
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
-  // Calculate Jojo IQ
+  const analysis = useMemo(() => {
+    if (!profile) return null;
+    return analyzeWeaknesses(profile, sessionLogs);
+  }, [profile, sessionLogs]);
+
+  const diffConfig = useMemo(() => {
+    if (!profile) return null;
+    return calculateSessionDifficulty(profile, sessionLogs);
+  }, [profile, sessionLogs]);
+
+  const learningVelocity = useMemo(() => {
+    if (!profile) return null;
+    return calculateLearningVelocity(profile, sessionLogs);
+  }, [profile, sessionLogs]);
+
   const currentIQ = useMemo(() => {
     if (!profile) return 90;
     return calculateJojoIQ(profile.level);
   }, [profile]);
+
+  const personalizedMessage = useMemo(() => {
+    const goal = profile?.onboardingAnswers?.learningGoal;
+    if (goal === 'think-faster') return 'Training to sharpen your processing speed';
+    if (goal === 'retain-more') return 'Building lasting memory capacity';
+    if (goal === 'focus-under-pressure') return 'Strengthening focus under cognitive load';
+    return null;
+  }, [profile]);
+
+  if (!profile) return null;
+
+  const topPadding = Platform.OS === 'web' ? 67 : insets.top;
+  const today = new Date().toDateString();
+  const sessionsToday = profile.lastSessionDate === today ? profile.sessionsToday : 0;
+  const maxDaily = profile.subscriptionType === 'premium' ? 99 : FREE_TIER_SESSIONS_PER_DAY;
+
+  const handleStartSession = () => {
+    if (!canStartSession) {
+      setShowUpgradeModal(true);
+      return;
+    }
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    }
+    router.push('/session');
+  };
+
+  const traits = [
+    { label: 'Pattern', value: profile.patternLevel, icon: 'grid' as const, color: '#00D4FF' },
+    { label: 'Memory', value: profile.memorySpan, icon: 'layers' as const, color: '#7B61FF' },
+    { label: 'Speed', value: profile.speedIndex, icon: 'trending-up' as const, color: '#00E676' },
+    { label: 'Flex', value: profile.flexibilityScore, icon: 'shuffle' as const, color: '#FFB74D' },
+    { label: 'Dual', value: profile.dualTaskCapacity, icon: 'git-merge' as const, color: '#FF6EC7' },
+  ];
+
+  const isWeakest = (label: string) => analysis?.focusTrait.name === TRAIT_LABEL_MAP[label];
+  const isStagnant = (label: string) => analysis?.stagnantTraits.some(st => st.key === TRAIT_KEY_MAP[label]) ?? false;
 
   return (
     <View style={[styles.container, { paddingTop: topPadding, backgroundColor: theme.background }]}>
@@ -46,7 +117,7 @@ export default function HomeScreen() {
             <View style={[styles.levelRow, { marginTop: 8 }]}>
               <Text style={[styles.levelText, { color: theme.text, fontSize: 16 }]}>Level {profile.level}</Text>
               <View style={[styles.levelProgressBar, { backgroundColor: theme.surfaceBorder }]}>
-                <View style={[styles.levelProgressFill, { width: `${(profile.level / 100) * 100}%`, backgroundColor: theme.accent }]} />
+                <View style={[styles.levelProgressFill, { width: `${(profile.level / MAX_LEVEL) * 100}%`, backgroundColor: theme.accent }]} />
               </View>
             </View>
           </View>
@@ -747,6 +818,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: Colors.dark.textSecondary,
     paddingVertical: 8,
-  },
   },
 });

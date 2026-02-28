@@ -106,9 +106,9 @@ export interface TraitAdjustment {
 }
 
 const KEYS = {
-  USER_PROFILE: 'acestudy_user_profile',
-  SESSION_LOGS: 'acestudy_session_logs',
-  CURRENT_SESSION: 'acestudy_current_session',
+  USER_PROFILE: 'jojo_user_profile',
+  SESSION_LOGS: 'jojo_session_logs',
+  CURRENT_SESSION: 'jojo_current_session',
 };
 
 export function createDefaultProfile(): UserProfile {

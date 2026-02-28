@@ -8,6 +8,7 @@ import {
   saveSessionLog,
   createDefaultProfile,
 } from '@/lib/storage';
+import { FREE_TIER_SESSIONS_PER_DAY } from '@/lib/constants';
 
 interface UserContextValue {
   profile: UserProfile | null;
@@ -68,7 +69,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     if (profile.subscriptionType === 'premium') return true;
     const today = new Date().toDateString();
     const sessionsToday = profile.lastSessionDate === today ? profile.sessionsToday : 0;
-    return sessionsToday < 3;
+    return sessionsToday < FREE_TIER_SESSIONS_PER_DAY;
   }, [profile]);
 
   const value = useMemo(

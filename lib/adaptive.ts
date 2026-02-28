@@ -121,7 +121,6 @@ export function calculateSessionDifficulty(
   recentSessions: SessionLog[],
 ): SessionDifficultyConfig {
   const analysis = analyzeWeaknesses(profile, recentSessions);
-  const currentIQ = calculateJojoIQ(profile.level);
 
   // Difficulty scaling factor based on IQ target.
   // We want the app to push users HARDER as they approach IQ 130.

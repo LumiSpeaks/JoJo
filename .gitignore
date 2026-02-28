@@ -34,6 +34,9 @@ yarn-error.*
 # local env files
 .env*.local
 
+# Replit internal state
+.local/
+
 # typescript
 *.tsbuildinfo
 .vercel
