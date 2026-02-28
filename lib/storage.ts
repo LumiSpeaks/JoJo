@@ -68,7 +68,7 @@ export interface UserProfile {
   theme?: 'system' | 'light' | 'dark';
   /** App Language preference */
   language?: 'en' | 'es' | 'fr' | 'de' | 'zh' | 'ja' | 'ru';
-  /** J.A.R.V.I.S. Protocol: Strict Mode (Fail session if accuracy < 80%) */
+  /** Jojo Protocol: Strict Mode (Fail session if accuracy < 80%) */
   strictMode?: boolean;
 }
 

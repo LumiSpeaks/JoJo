@@ -1,5 +1,5 @@
 /**
- * Onboarding questionnaire for AceStudy: tailored to real-world learning outcomes.
+ * Onboarding questionnaire for Jojo: tailored to real-world learning outcomes.
  * Mission: Expand intellectual capacity so you learn faster and think like top performers.
  * Values are stored in profile.onboardingAnswers and used to adapt the experience.
  */

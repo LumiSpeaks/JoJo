@@ -111,7 +111,7 @@ export default function SettingsScreen() {
 
         {/* ── Stats Row ───────────────────────────────────────────────── */}
         <View style={styles.statsRow}>
-          <StatPill icon="hardware-chip-outline" value={`${currentIQ}`} label="IQ" color={theme.brand} />
+          <StatPill icon="hardware-chip-outline" value={`${currentIQ}`} label="Score" color={theme.brand} />
           <StatPill icon="trophy" value={`${profile.level}/${levelCap}`} label="Level" color={theme.accent} />
           <StatPill icon="flame" value={`${profile.currentStreak ?? 0}`} label="Streak" color="#FF6B35" />
           <StatPill icon="flash" value={`${sessionsToday}/${isPremium ? '∞' : FREE_TIER_SESSIONS_PER_DAY}`} label="Today" color={theme.success} />
@@ -287,7 +287,7 @@ export default function SettingsScreen() {
         </Pressable>
 
         <Text style={[styles.version, { color: theme.textTertiary }]}>
-          v2.5.0 · J.A.R.V.I.S. Core · Jojo Protocol
+          v2.5.0 · Jojo Core · Jojo Protocol
         </Text>
 
         <View style={{ height: 120 }} />

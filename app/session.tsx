@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
+import { useThemeColors } from '@/hooks/useThemeColors';
 import { useUser } from '@/contexts/UserContext';
 import { ModuleScore } from '@/lib/storage';
 import {
@@ -31,7 +32,7 @@ import {
   getModuleDuration,
   SessionDifficultyConfig,
 } from '@/lib/adaptive';
-import { generateChallenge, GeneratedQuestion } from '@/lib/gemini'; // J.A.R.V.I.S. Protocol
+import { generateChallenge, GeneratedQuestion } from '@/lib/gemini'; // Jojo Protocol
 
 const { width } = Dimensions.get('window');
 
@@ -56,6 +57,7 @@ const SHAPE_ICONS: Record<string, string> = {
 
 export default function SessionScreen() {
   const insets = useSafeAreaInsets();
+  const theme = useThemeColors();
   const { profile, sessionLogs } = useUser();
   const [phase, setPhase] = useState<'intro' | 'moduleIntro' | 'playing' | 'done' | 'failed'>('intro');
   const [currentModuleIndex, setCurrentModuleIndex] = useState(0);
@@ -228,7 +230,7 @@ export default function SessionScreen() {
     const tier = getTierForModule(moduleType);
     const stagnation = getStagnationMode(moduleType);
 
-    // J.A.R.V.I.S. Protocol: Infinite Logic Generation
+    // Jojo Protocol: Infinite Logic Generation
     if (moduleType === 'rapidLogic') {
       try {
         const challenge = await generateChallenge(tier, 'logic');
@@ -258,7 +260,7 @@ export default function SessionScreen() {
           return;
         }
       } catch (e) {
-        console.warn("J.A.R.V.I.S. Generation Failed, using fallback.");
+        console.warn("Jojo Generation Failed, using fallback.");
       }
     }
 
@@ -387,10 +389,10 @@ export default function SessionScreen() {
       Haptics.impactAsync(isCorrect ? Haptics.ImpactFeedbackStyle.Light : Haptics.ImpactFeedbackStyle.Medium);
     }
 
-    const newCorrect = prev[moduleType].correct + (isCorrect ? 1 : 0);
-    const newTotal = prev[moduleType].total + 1;
+    const newCorrect = moduleResults[moduleType].correct + (isCorrect ? 1 : 0);
+    const newTotal = moduleResults[moduleType].total + 1;
 
-    // J.A.R.V.I.S. Protocol: Strict Mode Failure Check
+    // Strict Mode: fail session if accuracy drops below 80% after 5 answers
     if (profile?.strictMode && newTotal >= 5) {
       const currentAcc = (newCorrect / newTotal) * 100;
       if (currentAcc < 80) {
@@ -398,7 +400,7 @@ export default function SessionScreen() {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         }
         setPhase('failed');
-        return; // Stop processing
+        return;
       }
     }
 
@@ -418,7 +420,7 @@ export default function SessionScreen() {
       setQuestionIndex(nextIndex);
       generateNextQuestion(moduleType, nextIndex);
     }, 500);
-  }, [selectedOption, questionStartTime, currentModuleIndex, currentQuestion, questionIndex, generateNextQuestion]);
+  }, [selectedOption, questionStartTime, currentModuleIndex, currentQuestion, questionIndex, generateNextQuestion, moduleResults, profile]);
 
   const handleDualVisualAnswer = useCallback((optionIndex: number) => {
     if (dualVisualAnswer !== null) return;
@@ -447,10 +449,10 @@ export default function SessionScreen() {
       Haptics.impactAsync(bothCorrect ? Haptics.ImpactFeedbackStyle.Light : Haptics.ImpactFeedbackStyle.Medium);
     }
 
-    const newCorrect = prev.dualTask.correct + (bothCorrect ? 1 : 0);
-    const newTotal = prev.dualTask.total + 1;
+    const newCorrect = moduleResults.dualTask.correct + (bothCorrect ? 1 : 0);
+    const newTotal = moduleResults.dualTask.total + 1;
 
-    // J.A.R.V.I.S. Protocol: Strict Mode Failure
+    // Strict Mode: fail session if accuracy drops below 80% after 5 answers
     if (profile?.strictMode && newTotal >= 5) {
       if ((newCorrect / newTotal) * 100 < 80) {
         if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -473,7 +475,7 @@ export default function SessionScreen() {
       setQuestionIndex(nextIndex);
       generateNextQuestion('dualTask', nextIndex);
     }, 500);
-  }, [selectedOption, dualVisualAnswer, currentQuestion, questionStartTime, questionIndex, generateNextQuestion]);
+  }, [selectedOption, dualVisualAnswer, currentQuestion, questionStartTime, questionIndex, generateNextQuestion, moduleResults, profile]);
 
   const handleNBackVisualPress = useCallback(() => {
     if (nBackUserPressedVisual || !nBackTrialVisible) return;
@@ -536,13 +538,13 @@ export default function SessionScreen() {
 
   if (phase === 'failed') {
     return (
-      <View style={[styles.container, { paddingTop: topPadding, justifyContent: 'center', alignItems: 'center' }]}>
+      <View style={[styles.container, { paddingTop: topPadding, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.background }]}>
         <View style={styles.failCard}>
           <Ionicons name="warning" size={64} color={Colors.dark.error} />
           <Text style={styles.failTitle}>PROTOCOL FAILED</Text>
           <Text style={styles.failSub}>Accuracy dropped below 80%.</Text>
           <Text style={styles.failDesc}>
-            J.A.R.V.I.S. demands excellence. Strict Mode requires near-perfect execution to ensure rapid cognitive adaptation.
+            Jojo demands excellence. Strict Mode requires near-perfect execution to ensure rapid cognitive adaptation.
           </Text>
           <View style={styles.failStats}>
             <Text style={styles.failStatLabel}>Module Failed:</Text>
@@ -568,7 +570,7 @@ export default function SessionScreen() {
       { key: 'deep' as const, label: 'Deep Focus', mins: '30 min', desc: 'Extended training', icon: 'rocket' as const, premium: true },
     ];
     return (
-      <View style={[styles.container, { paddingTop: topPadding }]}>
+      <View style={[styles.container, { paddingTop: topPadding, backgroundColor: theme.background }]}>
         <Animated.View style={[styles.introContent, { opacity: fadeAnim }]}>
           <Text style={styles.introLabel}>SESSION FOCUS</Text>
           <Text style={styles.introTitle}>{focusName}</Text>
@@ -639,7 +641,7 @@ export default function SessionScreen() {
     const stagnation = getStagnationMode(meta.type);
 
     return (
-      <View style={[styles.container, { paddingTop: topPadding }]}>
+      <View style={[styles.container, { paddingTop: topPadding, backgroundColor: theme.background }]}>
         <View style={styles.moduleIntroContent}>
           <View style={styles.moduleCounter}>
             <Text style={styles.moduleCounterText}>MODULE {currentModuleIndex + 1} / 5</Text>
@@ -1221,7 +1223,7 @@ export default function SessionScreen() {
   };
 
   return (
-    <View style={[styles.container, { paddingTop: topPadding + 8 }]}>
+    <View style={[styles.container, { paddingTop: topPadding + 8, backgroundColor: theme.background }]}>
       <View style={styles.sessionHeader}>
         <Pressable onPress={() => router.back()} style={styles.exitBtn}>
           <Ionicons name="close" size={22} color={Colors.dark.textSecondary} />
@@ -2157,7 +2159,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
-  // ── J.A.R.V.I.S. Failure UI ──
+  // ── Jojo Failure UI ──
   failCard: {
     backgroundColor: '#0F0505',
     borderColor: '#EF4444',

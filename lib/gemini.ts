@@ -1,4 +1,4 @@
-// J.A.R.V.I.S. Protocol: Gemini Service Layer
+// Jojo Protocol: Gemini Service Layer
 // Uses Google Generative AI for infinite content generation.
 // Model: 3.1 Pro (via latest available API endpoint)
 
@@ -45,13 +45,13 @@ export async function generateChallenge(
 ): Promise<GeneratedQuestion | null> {
   
   if (!API_KEY) {
-    console.warn("J.A.R.V.I.S. Protocol: No API Key found. Falling back to local engine.");
+    console.warn("Jojo Protocol: No API Key found. Falling back to local engine.");
     return null;
   }
 
   // Construct a prompt that enforces strict JSON output and difficulty scaling.
   const prompt = `
-    You are J.A.R.V.I.S., an advanced cognitive training AI designed to boost human IQ.
+    You are Jojo, an advanced cognitive training AI designed to boost human IQ.
     
     TASK:
     Generate a SINGLE multiple-choice question to test ${type} at Difficulty Level ${difficulty}/100.
@@ -93,13 +93,13 @@ export async function generateChallenge(
       type
     };
   } catch (error) {
-    console.error("J.A.R.V.I.S. Generation Failed:", error);
+    console.error("Jojo Generation Failed:", error);
     return null; // The app should handle null by serving a static backup question.
   }
 }
 
 /**
- * Analyze user performance and provide J.A.R.V.I.S.-style coaching.
+ * Analyze user performance and provide Jojo-style coaching.
  * This runs after a session to give personalized, actionable feedback.
  */
 export async function analyzePerformance(
@@ -110,7 +110,7 @@ export async function analyzePerformance(
   if (!API_KEY) return "Protocol offline. Check neural link (API Key).";
 
   const prompt = `
-    You are J.A.R.V.I.S. Analyze this user's cognitive training session.
+    You are Jojo Analyze this user's cognitive training session.
     
     DATA:
     - User Level: ${profile.level} (Jojo Protocol)
@@ -133,7 +133,7 @@ export async function analyzePerformance(
     const text = result.response.text();
     return text.trim();
   } catch (error) {
-    console.error("J.A.R.V.I.S. Analysis Failed:", error);
+    console.error("Jojo Analysis Failed:", error);
     return "Focus required. Continue training.";
   }
 }

@@ -9,7 +9,7 @@ import { useUser } from '@/contexts/UserContext';
 import { ModuleScore, SessionLog } from '@/lib/storage';
 import { processSessionResults, calculateOverallAccuracy, calculateIntelligenceIndices, updateStreak, calculateJojoIQ } from '@/lib/adaptive';
 import { generateLearningApplications, generateImmediateAction } from '@/lib/learning-applications';
-import { analyzePerformance } from '@/lib/gemini'; // J.A.R.V.I.S. Protocol
+import { analyzePerformance } from '@/lib/gemini'; // Jojo Protocol
 
 export default function SessionCompleteScreen() {
   const [jarvisInsight, setJarvisInsight] = React.useState<string | null>(null);
@@ -19,7 +19,7 @@ export default function SessionCompleteScreen() {
   useEffect(() => {
     // ... (existing useEffect for results processing)
     if (!processedRef.current && profile) {
-      // Trigger J.A.R.V.I.S. analysis
+      // Trigger Jojo analysis
       const data = {
         accuracy: overallAccuracy,
         weakestTrait: analysis.weakestTrait.name
@@ -36,7 +36,7 @@ export default function SessionCompleteScreen() {
   //   <View style={styles.jarvisCard}>
   //     <View style={styles.jarvisHeader}>
   //       <Ionicons name="hardware-chip" size={24} color={Colors.dark.brand} />
-  //       <Text style={styles.jarvisTitle}>J.A.R.V.I.S. INSIGHT</Text>
+  //       <Text style={styles.jarvisTitle}>Jojo INSIGHT</Text>
   //     </View>
   //     <Text style={styles.jarvisText}>{jarvisInsight}</Text>
   //   </View>

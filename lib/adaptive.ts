@@ -99,18 +99,16 @@ export interface SessionDifficultyConfig {
   stagnationAdjustments: Record<string, 'variant' | 'timerCompress' | 'formatChange' | null>;
 }
 
+/**
+ * Calculates a Jojo Cognitive Score (JCS) — an internal performance index
+ * that reflects training progression and difficulty mastery. This is NOT an
+ * IQ score. It is a creative representation of where you stand within the
+ * Jojo training system and should be interpreted as a motivational benchmark only.
+ */
 export function calculateJojoIQ(level: number): number {
-  // Jojo IQ Protocol:
-  // Level 1 (Baseline) -> ~90 IQ
-  // Level 50 (Target) -> 130 IQ (Gifted)
-  // Level > 50 -> +1 IQ per level (e.g., Lvl 100 = 180 IQ)
-
   if (level >= 50) {
-    // Linear progression from 130 upwards
     return 130 + (level - 50);
   } else {
-    // Linear interpolation from 90 to 130
-    // (130 - 90) / 49 = ~0.816 per level
     const progress = (level - 1) / 49;
     return Math.round(90 + (progress * 40));
   }

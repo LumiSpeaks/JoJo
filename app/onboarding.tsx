@@ -208,7 +208,7 @@ export default function OnboardingScreen() {
               <Ionicons name="flash" size={56} color={theme.logoIcon} />
             </View>
           </View>
-          <Text style={[styles.landingTitle, { color: theme.text }]}>AceStudy</Text>
+          <Text style={[styles.landingTitle, { color: theme.text }]}>Jojo</Text>
           <Text style={[styles.landingTagline, { color: theme.textSecondary }]}>Cognitive training that adapts to you</Text>
           <View style={styles.landingSpacer} />
           <Pressable
@@ -378,7 +378,7 @@ export default function OnboardingScreen() {
               <Ionicons name="flash" size={48} color={theme.logoIcon} />
             </View>
           </View>
-          <Text style={styles.appTitle}>AceStudy</Text>
+          <Text style={styles.appTitle}>Jojo</Text>
           <Text style={styles.appSubtitle}>A quick baseline will personalize your training.</Text>
           <Pressable
             style={({ pressed }) => [styles.startButton, pressed && styles.startButtonPressed]}

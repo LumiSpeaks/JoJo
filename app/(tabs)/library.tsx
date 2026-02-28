@@ -270,15 +270,15 @@ export default function LibraryScreen() {
           {INTELLIGENCE_TYPES.map(item => <IQTypeCard key={item.key} item={item} />)}
         </View>
 
-        {/* ── IQ Scale ─────────────────────────────────────────────────── */}
-        <SectionHeader title="JOJO IQ SCALE" />
+        {/* ── Score Scale ───────────────────────────────────────────────── */}
+        <SectionHeader title="JOJO SCORE SCALE" subtitle="An internal training benchmark — not a clinical measure" />
         <View style={[styles.iqScaleCard, { backgroundColor: theme.surface, borderColor: theme.surfaceBorder }]}>
           {[
-            { range: 'Level 1', iq: '~90', label: 'Baseline', color: theme.textTertiary },
-            { range: 'Level 20', iq: '107', label: 'Above Average', color: theme.textSecondary },
-            { range: 'Level 50', iq: '130', label: 'Gifted', color: theme.brand },
-            { range: 'Level 75', iq: '155', label: 'Exceptional', color: theme.accent },
-            { range: 'Level 100', iq: '180', label: 'Mastery', color: '#F59E0B' },
+            { range: 'Level 1', score: '~90', label: 'Starting Point', color: theme.textTertiary },
+            { range: 'Level 20', score: '107', label: 'Building Momentum', color: theme.textSecondary },
+            { range: 'Level 50', score: '130', label: 'Significant Growth', color: theme.brand },
+            { range: 'Level 75', score: '155', label: 'Deep Mastery', color: theme.accent },
+            { range: 'Level 100', score: '180', label: 'Peak Performance', color: '#F59E0B' },
           ].map((row, i) => (
             <View
               key={i}
@@ -288,7 +288,7 @@ export default function LibraryScreen() {
               ]}
             >
               <Text style={[styles.iqScaleLevel, { color: theme.textTertiary }]}>{row.range}</Text>
-              <Text style={[styles.iqScaleIQ, { color: row.color }]}>IQ {row.iq}</Text>
+              <Text style={[styles.iqScaleIQ, { color: row.color }]}>{row.score}</Text>
               <Text style={[styles.iqScaleLabel, { color: row.color }]}>{row.label}</Text>
             </View>
           ))}
@@ -298,7 +298,7 @@ export default function LibraryScreen() {
         <View style={[styles.scienceNote, { backgroundColor: theme.surfaceLight, borderColor: theme.surfaceBorder }]}>
           <Ionicons name="flask" size={16} color={theme.textTertiary} />
           <Text style={[styles.scienceText, { color: theme.textTertiary }]}>
-            Jojo is built on dual n-back research, fluid intelligence training, and spaced repetition principles. Consistent daily practice is the only predictor of long-term cognitive gain.
+            Jojo draws on dual n-back research, fluid intelligence training, and spaced repetition principles. The Jojo Score is a creative training benchmark — not a clinical IQ measure. Results vary; consistent practice is what drives real-world cognitive improvement.
           </Text>
         </View>
 

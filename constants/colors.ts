@@ -37,7 +37,7 @@ export type ThemeColors = {
 };
 
 const Colors = {
-  /** Dark mode: J.A.R.V.I.S. / Cyberpunk style. Deep blacks, neon accents, glassmorphism. */
+  /** Dark mode: Jojo / Cyberpunk style. Deep blacks, neon accents, glassmorphism. */
   dark: {
     background: '#050B14', // Deeper, almost black blue
     surface: '#0F172A',    // Rich dark blue-grey

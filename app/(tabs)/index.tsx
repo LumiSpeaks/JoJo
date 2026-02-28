@@ -100,18 +100,18 @@ export default function HomeScreen() {
       >
         <View style={styles.header}>
           <View>
-            <Text style={[styles.greeting, { color: theme.textSecondary }]}>J.A.R.V.I.S. PROTOCOL</Text>
+            <Text style={[styles.greeting, { color: theme.textSecondary }]}>Jojo PROTOCOL</Text>
             {personalizedMessage ? (
               <Text style={[styles.personalizedSub, { color: theme.textSecondary }]} numberOfLines={2}>{personalizedMessage}</Text>
             ) : null}
             
-            {/* JOJO IQ DISPLAY */}
+            {/* Jojo Score */}
             <View style={[styles.iqBadge, { backgroundColor: theme.brandDim, borderColor: theme.brandGlow }]}>
               <View style={styles.iqRow}>
                 <Ionicons name="hardware-chip-outline" size={24} color={theme.brand} />
                 <Text style={[styles.iqValue, { color: theme.brand }]}>{currentIQ}</Text>
               </View>
-              <Text style={[styles.iqLabel, { color: theme.brand }]}>CURRENT IQ</Text>
+              <Text style={[styles.iqLabel, { color: theme.brand }]}>JOJO SCORE</Text>
             </View>
 
             <View style={[styles.levelRow, { marginTop: 8 }]}>
@@ -196,7 +196,7 @@ export default function HomeScreen() {
             <Text style={[styles.velocityText, { color: theme.text }]}>{learningVelocity.interpretation}</Text>
             {learningVelocity.velocity > 0 && (
               <Text style={[styles.velocitySubtext, { color: theme.textSecondary }]}>
-                At this rate, tasks that took 60 min will take ~{Math.round(60 * (1 - learningVelocity.velocity / 100))} min
+                Week-over-week improvement: +{learningVelocity.weekOverWeekChange.toFixed(1)}%
               </Text>
             )}
           </View>
@@ -219,7 +219,7 @@ export default function HomeScreen() {
             </View>
             {profile.subscriptionType === 'basic' && (
               <Text style={[styles.streakTip, { color: theme.textSecondary, borderTopColor: theme.surfaceBorder }]}>
-                💡 Research shows: 2-3 sessions/day for 8 weeks = optimal results
+                💡 Consistent daily training is the foundation of cognitive growth
               </Text>
             )}
           </View>
@@ -227,13 +227,14 @@ export default function HomeScreen() {
 
         <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>Cognitive Profile</Text>
 
+        {/* 2-column grid for first 4 traits */}
         <View style={styles.traitsGrid}>
-          {traits.map((trait, i) => (
+          {traits.slice(0, 4).map((trait, i) => (
             <View key={i} style={[
               styles.traitCard,
               { backgroundColor: theme.surface, borderColor: theme.surfaceBorder },
-              isWeakest(trait.label) && { borderColor: theme.brandGlow, backgroundColor: theme.brandDim },
-              isStagnant(trait.label) && { borderColor: theme.warningDim },
+              isWeakest(trait.label) && { borderColor: theme.brand + '60', backgroundColor: theme.brandDim },
+              isStagnant(trait.label) && { borderColor: theme.warning + '40' },
             ]}>
               <View style={[styles.traitIconContainer, { backgroundColor: trait.color + '18' }]}>
                 <Ionicons name={trait.icon} size={20} color={trait.color} />
@@ -253,6 +254,35 @@ export default function HomeScreen() {
             </View>
           ))}
         </View>
+
+        {/* 5th trait — full-width horizontal card */}
+        {traits[4] && (() => {
+          const trait = traits[4];
+          return (
+            <View style={[
+              styles.traitCardWide,
+              { backgroundColor: theme.surface, borderColor: theme.surfaceBorder },
+              isWeakest(trait.label) && { borderColor: theme.brand + '60', backgroundColor: theme.brandDim },
+              isStagnant(trait.label) && { borderColor: theme.warning + '40' },
+            ]}>
+              <View style={[styles.traitIconContainer, { backgroundColor: trait.color + '18' }]}>
+                <Ionicons name={trait.icon} size={20} color={trait.color} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.traitLabel, { color: theme.textSecondary, marginBottom: 2 }]}>{trait.label}</Text>
+                <View style={[styles.traitWideBar, { backgroundColor: theme.surfaceBorder }]}>
+                  <View style={[styles.traitWideBarFill, { width: `${Math.min(100, trait.value)}%`, backgroundColor: trait.color }]} />
+                </View>
+              </View>
+              <Text style={[styles.traitValue, { color: theme.text, marginLeft: 12 }]}>{trait.value}</Text>
+              {isWeakest(trait.label) && (
+                <View style={[styles.focusBadge, { backgroundColor: theme.brandDim, marginLeft: 8 }]}>
+                  <Text style={[styles.focusBadgeText, { color: theme.brand }]}>FOCUS</Text>
+                </View>
+              )}
+            </View>
+          );
+        })()}
 
         <View style={styles.statsRow}>
           <View style={[styles.statCard, { backgroundColor: theme.surface, borderColor: theme.surfaceBorder }]}>
@@ -624,23 +654,37 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
-    marginBottom: 20,
+    marginBottom: 10,
   },
   traitCard: {
     backgroundColor: Colors.dark.surface,
     borderRadius: 14,
     padding: 14,
     alignItems: 'center',
-    width: (width - 60) / 3,
+    width: (width - 58) / 2,
     borderWidth: 1,
     borderColor: Colors.dark.surfaceBorder,
   },
-  traitCardFocus: {
-    borderColor: Colors.dark.brand + '60',
-    backgroundColor: Colors.dark.brandDim,
+  traitCardWide: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.dark.surface,
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: Colors.dark.surfaceBorder,
+    marginBottom: 20,
+    gap: 12,
   },
-  traitCardStagnant: {
-    borderColor: Colors.dark.warning + '40',
+  traitWideBar: {
+    height: 6,
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginTop: 4,
+  },
+  traitWideBarFill: {
+    height: '100%',
+    borderRadius: 3,
   },
   traitIconContainer: {
     width: 36,
